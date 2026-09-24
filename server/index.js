@@ -657,7 +657,19 @@ app.post('/api/admin/students/:id/content', authenticate, requireAdmin, (req, re
 app.get('/api/admin/quizzes', authenticate, requireAdmin, (req, res) => res.json({ quizzes }));
 
 app.post('/api/admin/quizzes/import-pdf', authenticate, requireAdmin, pdfUpload.single('pdf'), async (req, res) => {
-  res.status(503).json({ message: 'استيراد PDF غير متاح على النسخة المنشورة حاليًا.' });
+  if (!req.file) return res.status(400).json({ message: 'اختر ملف PDF أولًا' });
+  if (req.file.mimetype !== 'application/pdf') return res.status(400).json({ message: 'الملف يجب أن يكون PDF' });
+  try {
+    const pdfModule = await import('pdf-parse');
+    const pdfParse = pdfModule.default || pdfModule;
+    const parsed = await pdfParse(req.file.buffer);
+    const questions = parseMcqText(parsed.text);
+    if (!questions.length) return res.status(422).json({ message: 'لم أجد أسئلة MCQ واضحة. استخدم ترقيم الأسئلة واختيارات A/B/C/D أو أ/ب/ج/د.' });
+    res.json({ fileName: req.file.originalname, questions, unresolved: questions.filter((question) => question.correctOption < 0).length });
+  } catch (error) {
+    console.error(`PDF parsing failed: ${error.message}`);
+    res.status(422).json({ message: 'تعذر قراءة ملف PDF. تأكد أنه يحتوي على نص قابل للتحديد وليس صورًا فقط.' });
+  }
 });
 
 app.post('/api/admin/quizzes', authenticate, requireAdmin, async (req, res) => {
