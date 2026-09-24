@@ -253,8 +253,12 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-app.get('/api/health', (req, res) => {
-  res.json({ ok: true, database: mongoReady ? 'connected' : mongoConfigured ? 'connecting' : 'not-configured', message: 'خدمة Shefo تعمل بشكل طبيعي' });
+app.get('/api/health', async (req, res) => {
+  if (mongoConfigured) await connectMongo;
+  if (mongoConfigured && !mongoReady) {
+    return res.status(503).json({ ok: false, database: 'unavailable', reason: mongoError?.name || 'connection-failed', message: 'تعذر الاتصال بقاعدة البيانات' });
+  }
+  res.json({ ok: true, database: mongoReady ? 'connected' : 'not-configured', message: 'خدمة Shefo تعمل بشكل طبيعي' });
 });
 
 app.use('/api', async (req, res, next) => {
