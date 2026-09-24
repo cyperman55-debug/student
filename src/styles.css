@@ -829,6 +829,13 @@ p {
   background: #fff3f1;
 }
 
+.admin-student-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
 .admin-students-section,
 .admin-payments-section,
 .question-bank-section,

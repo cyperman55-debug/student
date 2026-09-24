@@ -741,6 +741,29 @@ app.get('/api/admin/students', authenticate, requireAdmin, (req, res) => {
   });
 });
 
+app.delete('/api/admin/students/:id', authenticate, requireAdmin, async (req, res) => {
+  const studentId = Number(req.params.id);
+  const studentIndex = users.findIndex((item) => item.id === studentId && item.role === 'student');
+  if (studentIndex === -1) return res.status(404).json({ message: 'الطالب غير موجود' });
+
+  if (mongoReady) {
+    try {
+      await User.deleteOne({ id: studentId, role: 'student' });
+      await RechargeRequest.deleteMany({ studentId });
+    } catch (error) {
+      return res.status(500).json({ message: 'تعذر حذف الطالب من قاعدة البيانات' });
+    }
+  }
+
+  users.splice(studentIndex, 1);
+  rechargeRequests.splice(0, rechargeRequests.length, ...rechargeRequests.filter((request) => request.studentId !== studentId));
+  activityLog.splice(0, activityLog.length, ...activityLog.filter((item) => item.studentId !== studentId));
+  quizAttempts.splice(0, quizAttempts.length, ...quizAttempts.filter((attempt) => attempt.studentId !== studentId));
+  quizPurchases.splice(0, quizPurchases.length, ...quizPurchases.filter((purchase) => purchase.studentId !== studentId));
+  videoPurchases.splice(0, videoPurchases.length, ...videoPurchases.filter((purchase) => purchase.studentId !== studentId));
+  res.json({ success: true });
+});
+
 app.post('/api/admin/students/:id/balance', authenticate, requireAdmin, (req, res) => {
   const student = users.find((item) => item.id === Number(req.params.id) && item.role === 'student');
   const amount = Number(req.body.amount);

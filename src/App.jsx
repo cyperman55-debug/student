@@ -393,6 +393,25 @@ function App() {
     setStudentDetails(data);
   };
 
+  const deleteStudent = async (student) => {
+    if (!window.confirm(`هل أنت متأكد من حذف الطالب ${student.name}؟ لا يمكن التراجع عن هذا الإجراء.`)) return;
+    const response = await fetch(`${API_URL}/admin/students/${student.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await readApiResponse(response);
+    if (!response.ok) {
+      setStudentActionMessage(data.message || 'تعذر حذف الطالب');
+      return;
+    }
+    setStudentsList((current) => current.filter((item) => item.id !== student.id));
+    if (selectedStudentId === String(student.id)) {
+      setSelectedStudentId('');
+      setStudentDetails(null);
+    }
+    setStudentActionMessage('تم حذف الطالب بنجاح.');
+  };
+
   const toggleStudentVideo = async (videoId, open) => {
     const videoIds = studentDetails.videos.filter((video) => video.open).map((video) => video.id).filter((id) => id !== videoId);
     if (open) videoIds.push(videoId);
@@ -1377,7 +1396,10 @@ function App() {
               <div className="admin-students-grid">
                 {studentsList.map((student) => <article key={student.id} className="admin-student-card">
                   <div><h3>{student.name}</h3><p>{student.email}</p><span>الرصيد: {student.balance} جنيه مصري</span></div>
-                  <button type="button" className="primary-btn" onClick={async () => { setSelectedStudentId(String(student.id)); await loadStudentDetails(String(student.id)); }}>تفاصيل الحساب</button>
+                  <div className="admin-student-actions">
+                    <button type="button" className="primary-btn" onClick={async () => { setSelectedStudentId(String(student.id)); await loadStudentDetails(String(student.id)); }}>تفاصيل الحساب</button>
+                    <button type="button" className="small-btn danger-btn" onClick={() => deleteStudent(student)}>حذف الطالب</button>
+                  </div>
                 </article>)}
               </div>
               {studentDetails && <div className="student-details-panel panel">
