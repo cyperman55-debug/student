@@ -657,22 +657,7 @@ app.post('/api/admin/students/:id/content', authenticate, requireAdmin, (req, re
 app.get('/api/admin/quizzes', authenticate, requireAdmin, (req, res) => res.json({ quizzes }));
 
 app.post('/api/admin/quizzes/import-pdf', authenticate, requireAdmin, pdfUpload.single('pdf'), async (req, res) => {
-  if (process.env.VERCEL) {
-    return res.status(503).json({ message: 'استيراد PDF غير متاح على نسخة Vercel حاليًا. استخدم التشغيل المحلي لهذه العملية.' });
-  }
-  if (!req.file) return res.status(400).json({ message: 'اختر ملف PDF أولًا' });
-  if (req.file.mimetype !== 'application/pdf') return res.status(400).json({ message: 'الملف يجب أن يكون PDF' });
-  try {
-    const { PDFParse } = await import('pdf-parse');
-    const parser = new PDFParse({ data: req.file.buffer });
-    const parsed = await parser.getText();
-    await parser.destroy();
-    const questions = parseMcqText(parsed.text);
-    if (!questions.length) return res.status(422).json({ message: 'لم أجد أسئلة MCQ واضحة. استخدم ترقيم الأسئلة واختيارات A/B/C/D أو أ/ب/ج/د.' });
-    res.json({ fileName: req.file.originalname, questions, unresolved: questions.filter((question) => question.correctOption < 0).length });
-  } catch (error) {
-    res.status(422).json({ message: 'تعذر قراءة ملف PDF. تأكد أنه يحتوي على نص قابل للتحديد وليس صورًا فقط.' });
-  }
+  res.status(503).json({ message: 'استيراد PDF غير متاح على النسخة المنشورة حاليًا.' });
 });
 
 app.post('/api/admin/quizzes', authenticate, requireAdmin, async (req, res) => {

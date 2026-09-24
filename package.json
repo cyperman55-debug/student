@@ -17,8 +17,7 @@
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^9.10.2",
-    "multer": "^2.4.0",
-    "pdf-parse": "^2.4.5"
+    "multer": "^2.4.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
