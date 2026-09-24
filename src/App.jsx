@@ -1038,28 +1038,22 @@ function App() {
             </div>
           </section>
 
-          <section id="students" className="section-block" data-reveal>
+          {publicStudents.length > 0 && <section id="students" className="section-block" data-reveal>
             <div className="section-heading">
               <span className="eyebrow">الطلاب المتفوقون</span>
               <h2>نجاحات تدفعنا لمزيد من التفوق</h2>
             </div>
 
             <div className="student-grid-public">
-              {publicStudents.length > 0 ? publicStudents.map((student) => (
+              {publicStudents.map((student) => (
                 <div key={student.id} className="student-card-public" data-reveal>
                   <div className="avatar">{student.name.charAt(0)}</div>
                   <h3>{student.name}</h3>
                   {student.score && <strong>{student.score}</strong>}
                 </div>
-              )) : (
-                <div className="student-empty-state">
-                  <span className="student-empty-icon">★</span>
-                  <h3>طلابنا المتفوقون قريبًا</h3>
-                  <p>ستظهر هنا أسماء الطلاب ونتائجهم المميزة بمجرد إضافة البيانات.</p>
-                </div>
-              )}
+              ))}
             </div>
-          </section>
+          </section>}
 
           <section id="about" className="section-block about-block" data-reveal>
             <div className="section-heading">
