@@ -1091,6 +1091,7 @@ function App() {
             </form>
             </div>
           </div>}
+          <CreditFooter />
         </main>
       </div>
     );
@@ -1100,6 +1101,7 @@ function App() {
     return (
       <div className="auth-loading-screen">
         <div className="loading-card">جاري استعادة الجلسة...</div>
+        <CreditFooter />
       </div>
     );
   }
@@ -1140,6 +1142,7 @@ function App() {
               {!quizResult ? <button type="submit" className="primary-btn quiz-finish-btn">إنهاء الاختبار وتصحيح الإجابات</button> : <div className="quiz-final-result">نتيجتك: {quizResult.score} من {quizResult.total} ({Math.round((quizResult.score / quizResult.total) * 100)}%)</div>}
             </form>
           </main>
+          <CreditFooter />
         </div>
       );
     }
