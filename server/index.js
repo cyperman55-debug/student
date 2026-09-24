@@ -48,6 +48,13 @@ const videoSchema = new mongoose.Schema({
   price: { type: Number, default: 10, min: 0 },
 }, { versionKey: false });
 const Video = mongoose.models.Video || mongoose.model('Video', videoSchema);
+const videoPurchaseSchema = new mongoose.Schema({
+  videoId: { type: Number, required: true },
+  studentId: { type: Number, required: true },
+  price: { type: Number, required: true, min: 0 },
+  purchasedAt: { type: Date, default: Date.now },
+}, { versionKey: false });
+const VideoPurchase = mongoose.models.VideoPurchase || mongoose.model('VideoPurchase', videoPurchaseSchema);
 const rechargeSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
   studentId: { type: Number, required: true },
@@ -108,6 +115,13 @@ const connectMongo = mongoConfigured
         quizzes.push(...savedQuizzes.map((quiz) => ({ ...quiz, id: String(quiz.id || quiz._id), price: Number(quiz.price) >= 1 ? Number(quiz.price) : 10 })));
         const savedRechargeRequests = await RechargeRequest.find().lean();
         rechargeRequests.push(...savedRechargeRequests.map((request) => ({ ...request, id: String(request.id || request._id) })));
+        const savedVideoPurchases = await VideoPurchase.find().lean();
+        videoPurchases.push(...savedVideoPurchases.map((purchase) => ({
+          videoId: Number(purchase.videoId),
+          studentId: Number(purchase.studentId),
+          price: Number(purchase.price),
+          purchasedAt: purchase.purchasedAt,
+        })));
         console.log(`MongoDB connected; loaded ${savedQuizzes.length} quizzes`);
       })
       .catch((error) => {
@@ -576,7 +590,9 @@ app.post('/api/videos/:id/purchase', authenticate, async (req, res) => {
   const price = Number(video.price) || 0;
   if (!student || student.balance < price) return res.status(402).json({ message: `رصيدك غير كافٍ. سعر الفيديو ${price} جنيه مصري` });
   student.balance -= price;
-  videoPurchases.push({ videoId, studentId: student.id, price, purchasedAt: new Date().toISOString() });
+  const purchase = { videoId, studentId: student.id, price, purchasedAt: new Date().toISOString() };
+  videoPurchases.push(purchase);
+  if (mongoReady) await VideoPurchase.create(purchase);
   await User.updateOne({ id: student.id }, { $set: { balance: student.balance } });
   res.json({ success: true, purchased: true, balance: student.balance });
 });
