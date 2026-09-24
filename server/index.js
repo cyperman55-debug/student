@@ -98,10 +98,9 @@ function normalizeVideoUrl(value) {
   return youtubeMatch ? `https://www.youtube.com/embed/${youtubeMatch[1]}` : url;
 }
 
-const connectMongo = mongoConfigured
+const initializeMongo = () => mongoConfigured
   ? mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 10000 })
       .then(async () => {
-        mongoReady = true;
         const savedUsers = await User.find().lean();
         if (savedUsers.length) {
           users.splice(0, users.length, ...savedUsers);
@@ -143,15 +142,31 @@ const connectMongo = mongoConfigured
         } else {
           await ChatMessage.insertMany(chatMessages);
         }
+        mongoReady = true;
         console.log(`MongoDB connected; loaded ${savedQuizzes.length} quizzes`);
+        return true;
       })
       .catch((error) => {
+        mongoReady = false;
         mongoError = error;
         console.warn(`MongoDB unavailable: ${error.message}. Continuing with in-memory mode.`);
+        return false;
       })
   : Promise.resolve().then(() => {
       console.log('MongoDB not configured; running in memory mode.');
+    return true;
     });
+
+let connectMongo = initializeMongo();
+
+async function waitForMongo() {
+  if (!mongoConfigured || mongoReady) return;
+  const connected = await connectMongo;
+  if (!mongoReady && !connected) {
+    connectMongo = initializeMongo();
+    await connectMongo;
+  }
+}
 
 function requireMongo(res) {
   if (!mongoReady && mongoConfigured) {
@@ -290,7 +305,7 @@ function requireAdmin(req, res, next) {
 }
 
 app.get('/api/health', async (req, res) => {
-  if (mongoConfigured) await connectMongo;
+  await waitForMongo();
   if (mongoConfigured && !mongoReady) {
     return res.status(503).json({ ok: false, database: 'unavailable', reason: mongoError?.name || 'connection-failed', message: 'تعذر الاتصال بقاعدة البيانات' });
   }
@@ -299,7 +314,7 @@ app.get('/api/health', async (req, res) => {
 
 app.use('/api', async (req, res, next) => {
   if (!mongoConfigured) return next();
-  await connectMongo;
+  await waitForMongo();
   if (!mongoReady) {
     return res.status(503).json({ message: 'قاعدة البيانات غير متاحة. راجع MONGODB_URI في إعدادات Vercel.', detail: process.env.VERCEL ? undefined : mongoError?.message });
   }
