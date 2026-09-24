@@ -16,9 +16,11 @@ async function readApiResponse(response) {
 function CreditFooter() {
   return (
     <footer className="credit-footer">
-      تم البرمجة والتصميم من{' '}
-      <a href="https://www.instagram.com/tarekhus72?stkn=dWJlZjB6MHd3Z2Zx&utm_source=qr" target="_blank" rel="noreferrer">
-        RIOT.OSI
+           
+  <a href="https://www.instagram.com/tarekhus72?stkn=dWJlZjB6MHd3Z2Zx&utm_source=qr" target="_blank" rel="noreferrer">
+      
+       RIOT.OSI{' '} تم البرمجة والتصميم بواسطه 
+
       </a>
     </footer>
   );
