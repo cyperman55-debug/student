@@ -443,7 +443,8 @@ p {
 .logout-btn,
 .pay-btn,
 .watch-btn,
-.lock-btn {
+.lock-btn,
+.auth-form > button:not(.secondary-btn) {
   border: none;
   border-radius: 10px;
   padding: 12px 16px;
@@ -452,6 +453,15 @@ p {
   isolation: isolate;
   overflow: hidden;
   transition: transform 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.cta-btn,
+.logout-btn,
+.auth-form > button:not(.secondary-btn) {
+  background: linear-gradient(135deg, #d8a84e, #b97920);
+  color: #fffdf4;
+  border: 1px solid rgba(255, 239, 186, 0.5);
+  box-shadow: 0 7px 0 rgba(137, 87, 19, 0.22);
 }
 
 .stage-button::after,
@@ -498,13 +508,20 @@ p {
 .secondary-btn:hover,
 .cta-btn:hover,
 .stage-button:hover,
-.logout-btn:hover,
 .pay-btn:hover,
 .watch-btn:hover,
 .lock-btn:hover {
   transform: translateY(-3px) scale(1.015);
   box-shadow: 0 10px 20px rgba(16, 92, 84, 0.18);
   filter: saturate(1.08);
+}
+
+.cta-btn:hover,
+.logout-btn:hover,
+.auth-form > button:not(.secondary-btn):hover {
+  transform: translateY(-4px) scale(1.025) rotate(-1deg);
+  box-shadow: 0 12px 24px rgba(137, 87, 19, 0.28);
+  filter: brightness(1.06) saturate(1.1);
 }
 
 .stage-button:hover::after,
@@ -534,6 +551,13 @@ p {
 .nav-item:active {
   transform: translateY(0) scale(0.97);
   box-shadow: none;
+}
+
+.cta-btn:active,
+.logout-btn:active,
+.auth-form > button:not(.secondary-btn):active {
+  transform: translateY(1px) scale(0.96);
+  box-shadow: 0 2px 0 rgba(137, 87, 19, 0.22);
 }
 
 .stage-button:focus-visible,
