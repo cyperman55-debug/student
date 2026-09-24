@@ -484,6 +484,9 @@ app.get('/api/dashboard', authenticate, (req, res) => {
         totalStudents: students.length,
         activeLessons: 2,
         totalWalletBalance: students.reduce((total, student) => total + student.balance, 0),
+        totalTransferredAmount: rechargeRequests
+          .filter((request) => request.status === 'Approved')
+          .reduce((total, request) => total + Number(request.creditedAmount ?? request.amount ?? 0), 0),
         activeStudents: students.filter((student) => student.balance > 0 || student.contentUnlocked).length,
       },
       summary: 'هذه الإحصائيات محسوبة مباشرة من حسابات الطلاب وحالة المحتوى الحالية.',

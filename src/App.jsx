@@ -1307,6 +1307,10 @@ function App() {
                 <strong>{dashboard.stats.totalWalletBalance.toLocaleString()} جنيه مصري</strong>
               </div>
               <div className="stat-card">
+                <span>إجمالي المبالغ المحولة للمنصة</span>
+                <strong>{(dashboard.stats.totalTransferredAmount ?? 0).toLocaleString()} جنيه مصري</strong>
+              </div>
+              <div className="stat-card">
                 <span>طلاب لديهم وصول</span>
                 <strong>{dashboard.stats.activeStudents}</strong>
               </div>
