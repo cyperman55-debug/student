@@ -641,6 +641,9 @@ app.post('/api/admin/students/:id/content', authenticate, requireAdmin, (req, re
 app.get('/api/admin/quizzes', authenticate, requireAdmin, (req, res) => res.json({ quizzes }));
 
 app.post('/api/admin/quizzes/import-pdf', authenticate, requireAdmin, pdfUpload.single('pdf'), async (req, res) => {
+  if (process.env.VERCEL) {
+    return res.status(503).json({ message: 'استيراد PDF غير متاح على نسخة Vercel حاليًا. استخدم التشغيل المحلي لهذه العملية.' });
+  }
   if (!req.file) return res.status(400).json({ message: 'اختر ملف PDF أولًا' });
   if (req.file.mimetype !== 'application/pdf') return res.status(400).json({ message: 'الملف يجب أن يكون PDF' });
   try {
