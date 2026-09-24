@@ -235,6 +235,32 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const isEditableTarget = (target) => ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName) || target?.isContentEditable;
+    const preventContextMenu = (event) => {
+      if (!isEditableTarget(event.target)) event.preventDefault();
+    };
+    const preventProtectedShortcuts = (event) => {
+      const key = String(event.key || '').toLowerCase();
+      const blockedShortcut = event.ctrlKey && ['s', 'p', 'u'].includes(key);
+      const blockedDevTools = event.key === 'F12' || (event.ctrlKey && event.shiftKey && ['i', 'j', 'c'].includes(key));
+      if (event.key === 'PrintScreen' || blockedShortcut || blockedDevTools) {
+        event.preventDefault();
+        if (navigator.clipboard?.writeText) navigator.clipboard.writeText('').catch(() => {});
+      }
+    };
+    const preventDrag = (event) => event.preventDefault();
+
+    document.addEventListener('contextmenu', preventContextMenu);
+    document.addEventListener('keydown', preventProtectedShortcuts);
+    document.addEventListener('dragstart', preventDrag);
+    return () => {
+      document.removeEventListener('contextmenu', preventContextMenu);
+      document.removeEventListener('keydown', preventProtectedShortcuts);
+      document.removeEventListener('dragstart', preventDrag);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!token) {
       setAuthLoading(false);
       return;
@@ -1203,13 +1229,18 @@ function App() {
         {selectedVideo && !selectedVideo.locked && (
           <section className="student-player">
             <h3>{selectedVideo.title}</h3>
-            <iframe
-              src={selectedVideo.url}
-              title={selectedVideo.title}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-              className="video-frame"
-            />
+            <div className="protected-video-frame">
+              <iframe
+                src={selectedVideo.url}
+                title={selectedVideo.title}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                className="video-frame"
+              />
+              <div className="video-watermark" aria-hidden="true">
+                {user.email} • {user.name}
+              </div>
+            </div>
           </section>
         )}
 

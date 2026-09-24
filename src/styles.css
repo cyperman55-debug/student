@@ -1926,6 +1926,33 @@ p {
   border-radius: 14px;
 }
 
+.protected-video-frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+  user-select: none;
+}
+
+.protected-video-frame .video-frame {
+  display: block;
+}
+
+.video-watermark {
+  position: absolute;
+  z-index: 2;
+  top: 16%;
+  left: 8%;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.28);
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.78rem;
+  pointer-events: none;
+  transform: rotate(-12deg);
+  user-select: none;
+}
+
 .video-grid {
   display: grid;
   gap: 16px;
