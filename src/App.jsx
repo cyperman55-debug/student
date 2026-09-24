@@ -1122,34 +1122,6 @@ function App() {
           </section>
         </div>}
 
-        <section className="student-quizzes">
-          <div className="section-heading">
-            <span className="eyebrow">بنك الأسئلة</span>
-            <h2>اختباراتك التعليمية</h2>
-          </div>
-          <div className="quiz-card-grid">
-            {(dashboard?.quizzes || []).map((quiz) => {
-              const attempt = (dashboard?.attempts || []).find((item) => item.quizId === quiz.id);
-              return <article key={quiz.id} className="quiz-card">
-                <h3>{quiz.title}</h3>
-                <p>{quiz.description}</p>
-                <span>{quiz.questionCount} أسئلة • {quiz.price > 0 ? `${quiz.price} جنيه مصري` : 'مجاني'} {attempt ? `• آخر درجة ${attempt.score}/${attempt.total}` : ''}</span>
-                <button type="button" className="primary-btn" onClick={() => startQuiz(quiz.id)} disabled={loading}>{loading ? 'جاري التحقق...' : quiz.purchased ? 'ابدأ الاختبار' : quiz.price > 0 ? 'شراء وبدء الاختبار' : 'ابدأ الاختبار'}</button>
-              </article>;
-            })}
-            {!dashboard?.quizzes?.length && <div className="empty-state">لا توجد اختبارات متاحة حاليًا.</div>}
-          </div>
-        </section>
-
-        <section className="chat-launcher student-chat-launcher">
-          <div>
-            <span className="eyebrow">مجتمع الطلاب</span>
-            <h3>اسأل، ناقش، وتعلم مع زملائك</h3>
-            <p>الشات متاح للطلاب المسجلين فقط وتحت إشراف المدرس.</p>
-          </div>
-          <button type="button" className="primary-btn" onClick={openChat}>دخول الشات</button>
-        </section>
-
         {error && <div className="error-box">{error}</div>}
 
         <section className="student-grid">
@@ -1194,6 +1166,34 @@ function App() {
             />
           </section>
         )}
+
+        <section className="student-quizzes">
+          <div className="section-heading">
+            <span className="eyebrow">بنك الأسئلة</span>
+            <h2>اختباراتك التعليمية</h2>
+          </div>
+          <div className="quiz-card-grid">
+            {(dashboard?.quizzes || []).map((quiz) => {
+              const attempt = (dashboard?.attempts || []).find((item) => item.quizId === quiz.id);
+              return <article key={quiz.id} className="quiz-card">
+                <h3>{quiz.title}</h3>
+                <p>{quiz.description}</p>
+                <span>{quiz.questionCount} أسئلة • {quiz.price > 0 ? `${quiz.price} جنيه مصري` : 'مجاني'} {attempt ? `• آخر درجة ${attempt.score}/${attempt.total}` : ''}</span>
+                <button type="button" className="primary-btn" onClick={() => startQuiz(quiz.id)} disabled={loading}>{loading ? 'جاري التحقق...' : quiz.purchased ? 'ابدأ الاختبار' : quiz.price > 0 ? 'شراء وبدء الاختبار' : 'ابدأ الاختبار'}</button>
+              </article>;
+            })}
+            {!dashboard?.quizzes?.length && <div className="empty-state">لا توجد اختبارات متاحة حاليًا.</div>}
+          </div>
+        </section>
+
+        <section className="chat-launcher student-chat-launcher">
+          <div>
+            <span className="eyebrow">مجتمع الطلاب</span>
+            <h3>اسأل، ناقش، وتعلم مع زملائك</h3>
+            <p>الشات متاح للطلاب المسجلين فقط وتحت إشراف المدرس.</p>
+          </div>
+          <button type="button" className="primary-btn" onClick={openChat}>دخول الشات</button>
+        </section>
 
         {chatOpen && <div className="chat-modal-backdrop" onClick={() => setChatOpen(false)}>
           <section className="chat-modal" onClick={(event) => event.stopPropagation()}>
