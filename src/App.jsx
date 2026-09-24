@@ -13,6 +13,17 @@ async function readApiResponse(response) {
   return response.json();
 }
 
+function CreditFooter() {
+  return (
+    <footer className="credit-footer">
+      تم البرمجة والتصميم من{' '}
+      <a href="https://www.instagram.com/tarekhus72?stkn=dWJlZjB6MHd3Z2Zx&utm_source=qr" target="_blank" rel="noreferrer">
+        RIOT.OSI
+      </a>
+    </footer>
+  );
+}
+
 const publicStages = [
   {
     id: 1,
@@ -1344,6 +1355,7 @@ function App() {
             </form>
           </section>
         </div>}
+        <CreditFooter />
       </div>
     );
   }
@@ -1738,6 +1750,7 @@ function App() {
             </section>}
           </>
         )}
+        <CreditFooter />
       </main>
     </div>
   );
