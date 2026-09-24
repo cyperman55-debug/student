@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const API_URL = '/api';
 const SESSION_TOKEN_KEY = 'shefo-token';
@@ -145,6 +145,7 @@ function App() {
   const [paymentRequests, setPaymentRequests] = useState([]);
   const [paymentApprovalAmounts, setPaymentApprovalAmounts] = useState({});
   const [videoPurchaseLoading, setVideoPurchaseLoading] = useState(null);
+  const protectedVideoRef = useRef(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileName, setProfileName] = useState('');
   const [profilePhone, setProfilePhone] = useState('');
@@ -650,6 +651,15 @@ function App() {
       setProfileMessage(data.message || 'تم حفظ الملف الشخصي');
     } catch (err) {
       setProfileMessage(err.message || 'تعذر تحديث الملف الشخصي');
+    }
+  };
+
+  const toggleProtectedFullscreen = async () => {
+    if (!protectedVideoRef.current) return;
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await protectedVideoRef.current.requestFullscreen();
     }
   };
 
@@ -1229,17 +1239,20 @@ function App() {
         {selectedVideo && !selectedVideo.locked && (
           <section className="student-player">
             <h3>{selectedVideo.title}</h3>
-            <div className="protected-video-frame">
+            <div ref={protectedVideoRef} className="protected-video-frame">
               <iframe
+                key={selectedVideo.id}
                 src={selectedVideo.url}
                 title={selectedVideo.title}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
                 className="video-frame"
               />
               <div className="video-watermark" aria-hidden="true">
                 {user.email} • {user.name}
               </div>
+              <button type="button" className="protected-fullscreen-btn" onClick={toggleProtectedFullscreen}>
+                ⛶ ملء الشاشة المحمي
+              </button>
             </div>
           </section>
         )}
