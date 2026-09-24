@@ -929,7 +929,6 @@ function App() {
           <nav className="landing-nav">
             <a href="#features">المميزات</a>
             <a href="#levels">المراحل</a>
-            <a href="#students">الطلاب</a>
           </nav>
 
           <button className="cta-btn" onClick={scrollToLogin}>تسجيل الدخول</button>
@@ -1037,23 +1036,6 @@ function App() {
               </div>
             </div>
           </section>
-
-          {publicStudents.length > 0 && <section id="students" className="section-block" data-reveal>
-            <div className="section-heading">
-              <span className="eyebrow">الطلاب المتفوقون</span>
-              <h2>نجاحات تدفعنا لمزيد من التفوق</h2>
-            </div>
-
-            <div className="student-grid-public">
-              {publicStudents.map((student) => (
-                <div key={student.id} className="student-card-public" data-reveal>
-                  <div className="avatar">{student.name.charAt(0)}</div>
-                  <h3>{student.name}</h3>
-                  {student.score && <strong>{student.score}</strong>}
-                </div>
-              ))}
-            </div>
-          </section>}
 
           <section id="about" className="section-block about-block" data-reveal>
             <div className="section-heading">
