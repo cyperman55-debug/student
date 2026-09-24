@@ -5,3 +5,5 @@ dist/
 !.env.example
 atlas-credentials*.env
 server/data/
+.vercel
+.env*
