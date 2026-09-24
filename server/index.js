@@ -56,6 +56,16 @@ const videoPurchaseSchema = new mongoose.Schema({
   purchasedAt: { type: Date, default: Date.now },
 }, { versionKey: false });
 const VideoPurchase = mongoose.models.VideoPurchase || mongoose.model('VideoPurchase', videoPurchaseSchema);
+const chatMessageSchema = new mongoose.Schema({
+  id: { type: Number, required: true, unique: true },
+  userId: { type: Number, required: true },
+  userName: { type: String, required: true },
+  role: { type: String, required: true },
+  text: { type: String, required: true, maxlength: 500 },
+  pinned: { type: Boolean, default: false },
+  createdAt: { type: Date, default: Date.now },
+}, { versionKey: false });
+const ChatMessage = mongoose.models.ChatMessage || mongoose.model('ChatMessage', chatMessageSchema);
 const rechargeSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
   studentId: { type: Number, required: true },
@@ -123,6 +133,16 @@ const connectMongo = mongoConfigured
           price: Number(purchase.price),
           purchasedAt: purchase.purchasedAt,
         })));
+        const savedChatMessages = await ChatMessage.find().sort({ createdAt: 1 }).lean();
+        if (savedChatMessages.length) {
+          chatMessages.splice(0, chatMessages.length, ...savedChatMessages.map((message) => ({
+            ...message,
+            id: Number(message.id),
+            userId: Number(message.userId),
+          })));
+        } else {
+          await ChatMessage.insertMany(chatMessages);
+        }
         console.log(`MongoDB connected; loaded ${savedQuizzes.length} quizzes`);
       })
       .catch((error) => {
@@ -477,25 +497,28 @@ app.get('/api/chat/messages', authenticate, (req, res) => {
   res.json({ messages: [...chatMessages].sort((first, second) => Number(second.pinned) - Number(first.pinned) || new Date(first.createdAt) - new Date(second.createdAt)) });
 });
 
-app.post('/api/chat/messages', authenticate, (req, res) => {
+app.post('/api/chat/messages', authenticate, async (req, res) => {
   const text = String(req.body.text || '').trim();
   if (!text || text.length > 500) return res.status(400).json({ message: 'اكتب رسالة من 1 إلى 500 حرف' });
   const message = { id: chatMessages.length ? Math.max(...chatMessages.map((item) => item.id)) + 1 : 1, userId: req.user.id, userName: req.user.name, role: req.user.role, text, pinned: false, createdAt: new Date().toISOString() };
   chatMessages.push(message);
+  if (mongoReady) await ChatMessage.create(message);
   res.status(201).json({ message });
 });
 
-app.patch('/api/chat/messages/:id/pin', authenticate, requireAdmin, (req, res) => {
+app.patch('/api/chat/messages/:id/pin', authenticate, requireAdmin, async (req, res) => {
   const message = chatMessages.find((item) => item.id === Number(req.params.id));
   if (!message) return res.status(404).json({ message: 'الرسالة غير موجودة' });
   message.pinned = !message.pinned;
+  if (mongoReady) await ChatMessage.updateOne({ id: message.id }, { $set: { pinned: message.pinned } });
   res.json({ message });
 });
 
-app.delete('/api/chat/messages/:id', authenticate, requireAdmin, (req, res) => {
+app.delete('/api/chat/messages/:id', authenticate, requireAdmin, async (req, res) => {
   const messageIndex = chatMessages.findIndex((item) => item.id === Number(req.params.id));
   if (messageIndex === -1) return res.status(404).json({ message: 'الرسالة غير موجودة' });
-  chatMessages.splice(messageIndex, 1);
+  const [message] = chatMessages.splice(messageIndex, 1);
+  if (mongoReady) await ChatMessage.deleteOne({ id: message.id });
   res.json({ success: true });
 });
 
