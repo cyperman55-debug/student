@@ -87,6 +87,7 @@ function App() {
   const [token, setToken] = useState(localStorage.getItem('shefo-token') || '');
   const [user, setUser] = useState(null);
   const [dashboard, setDashboard] = useState(null);
+  const [authLoading, setAuthLoading] = useState(Boolean(localStorage.getItem('shefo-token')));
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [videoTitle, setVideoTitle] = useState('');
@@ -225,7 +226,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      setAuthLoading(false);
+      return;
+    }
+    setAuthLoading(true);
 
     const loadData = async () => {
       try {
@@ -252,6 +257,7 @@ function App() {
         setError(err.message || 'انتهت الجلسة');
       } finally {
         setLoading(false);
+        setAuthLoading(false);
       }
     };
 
@@ -928,6 +934,14 @@ function App() {
             </div>
           </div>}
         </main>
+      </div>
+    );
+  }
+
+  if (authLoading || !user) {
+    return (
+      <div className="auth-loading-screen">
+        <div className="loading-card">جاري استعادة الجلسة...</div>
       </div>
     );
   }
