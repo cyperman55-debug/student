@@ -1012,7 +1012,7 @@ function App() {
             <div className="feature-grid">
               {featureItems.map((item, index) => (
                 <div key={item.title} className="feature-card" data-reveal>
-                  <span className="feature-index">0{index + 1}</span>
+                  <span className="feature-index">{index + 1}</span>
                   <span className="feature-icon">{item.icon}</span>
                   <h3>{item.title}</h3>
                   <p>{item.text}</p>
