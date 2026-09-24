@@ -802,6 +802,12 @@ p {
   background: #ffffff;
 }
 
+.admin-chat-form {
+  margin-top: 16px;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--line);
+}
+
 .chat-admin-panel {
   margin-bottom: 24px;
 }

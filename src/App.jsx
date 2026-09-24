@@ -1381,7 +1381,12 @@ function App() {
                     </div>
                   </article>
                 ))}
+                {!chatMessages.length && <div className="chat-empty-state">لا توجد رسائل بعد. ابدأ أول رسالة للطلاب.</div>}
               </div>
+              <form className="chat-form admin-chat-form" onSubmit={sendChatMessage}>
+                <input value={chatText} onChange={(event) => setChatText(event.target.value)} placeholder="اكتب رسالة للطلاب..." maxLength={500} />
+                <button type="submit" className="primary-btn">إرسال للطلاب</button>
+              </form>
             </section>}
 
             <section className="stats-grid">
