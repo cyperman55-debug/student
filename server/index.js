@@ -314,14 +314,17 @@ app.get('/api/public/students', (req, res) => {
   });
 });
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
     return res.status(400).json({ message: 'البريد الإلكتروني وكلمة المرور مطلوبان' });
   }
 
-  const user = users.find((item) => item.email.toLowerCase() === String(email).toLowerCase());
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const user = mongoReady
+    ? await User.findOne({ email: normalizedEmail }).lean()
+    : users.find((item) => item.email.toLowerCase() === normalizedEmail);
 
   if (!user) {
     return res.status(401).json({ message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' });
@@ -333,6 +336,9 @@ app.post('/api/login', (req, res) => {
     return res.status(401).json({ message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' });
   }
 
+  const memoryUser = users.find((item) => item.id === user.id);
+  if (memoryUser) Object.assign(memoryUser, user);
+  else users.push(user);
   const token = generateToken(user);
 
   res.json({
@@ -735,12 +741,16 @@ app.post('/api/admin/students/:id/balance', authenticate, requireAdmin, (req, re
 });
 
 app.post('/api/admin/students/:id/password', authenticate, requireAdmin, async (req, res) => {
-  const student = users.find((item) => item.id === Number(req.params.id) && item.role === 'student');
+  const student = mongoReady
+    ? await User.findOne({ id: Number(req.params.id), role: 'student' })
+    : users.find((item) => item.id === Number(req.params.id) && item.role === 'student');
   const password = String(req.body.password || '');
   if (!student) return res.status(404).json({ message: 'الطالب غير موجود' });
   if (password.length < 6) return res.status(400).json({ message: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' });
   student.passwordHash = await bcrypt.hash(password, 10);
   await User.updateOne({ id: student.id }, { $set: { passwordHash: student.passwordHash } });
+  const memoryStudent = users.find((item) => item.id === Number(student.id));
+  if (memoryStudent) memoryStudent.passwordHash = student.passwordHash;
   res.json({ success: true, message: 'تم تغيير كلمة مرور الطالب' });
 });
 
