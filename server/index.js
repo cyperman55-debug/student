@@ -58,6 +58,7 @@ const rechargeSchema = new mongoose.Schema({
   status: { type: String, default: 'Pending' },
   rejectionReason: String,
   reviewedAt: Date,
+  creditedAmount: Number,
   createdAt: { type: Date, default: Date.now },
 }, { versionKey: false });
 const RechargeRequest = mongoose.models.RechargeRequest || mongoose.model('RechargeRequest', rechargeSchema);
@@ -406,11 +407,14 @@ app.post('/api/admin/recharge-requests/:id/approve', authenticate, requireAdmin,
   if (request.status !== 'Pending') return res.status(409).json({ message: 'تمت مراجعة الطلب من قبل' });
   const student = users.find((user) => user.id === request.studentId);
   if (!student) return res.status(404).json({ message: 'الطالب غير موجود' });
-  student.balance += request.amount;
+  const creditedAmount = Number(req.body.amount ?? request.amount);
+  if (!Number.isFinite(creditedAmount) || creditedAmount <= 0) return res.status(400).json({ message: 'مبلغ الإضافة غير صحيح' });
+  student.balance += creditedAmount;
   request.status = 'Approved';
+  request.creditedAmount = creditedAmount;
   request.reviewedAt = new Date().toISOString();
   await User.updateOne({ id: student.id }, { $set: { balance: student.balance } });
-  await RechargeRequest.updateOne({ id: request.id }, { $set: { status: request.status, reviewedAt: request.reviewedAt } });
+  await RechargeRequest.updateOne({ id: request.id }, { $set: { status: request.status, creditedAmount: request.creditedAmount, reviewedAt: request.reviewedAt } });
   res.json({ request, balance: student.balance, message: 'تم اعتماد الطلب وإضافة الرصيد' });
 });
 

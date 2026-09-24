@@ -139,6 +139,7 @@ function App() {
   const [rechargeNotes, setRechargeNotes] = useState('');
   const [rechargeMessage, setRechargeMessage] = useState('');
   const [paymentRequests, setPaymentRequests] = useState([]);
+  const [paymentApprovalAmounts, setPaymentApprovalAmounts] = useState({});
   const [videoPurchaseLoading, setVideoPurchaseLoading] = useState(null);
 
   const scrollToLogin = () => {
@@ -343,15 +344,25 @@ function App() {
     const response = await fetch(`${API_URL}/admin/recharge-requests`, { headers: { Authorization: `Bearer ${token}` } });
     const data = await readApiResponse(response);
     if (!response.ok) throw new Error(data.message || 'تعذر تحميل طلبات الدفع');
-    setPaymentRequests(data.requests || []);
+    const requests = data.requests || [];
+    setPaymentRequests(requests);
+    setPaymentApprovalAmounts((current) => requests.reduce((amounts, request) => ({
+      ...amounts,
+      [request.id]: current[request.id] ?? request.amount,
+    }), current));
   };
 
   const reviewPaymentRequest = async (requestId, action) => {
     const reason = action === 'reject' ? window.prompt('اكتب سبب رفض الطلب') : '';
     if (action === 'reject' && !reason) return;
+    const approvalAmount = paymentApprovalAmounts[requestId];
+    if (action === 'approve' && (!Number.isFinite(Number(approvalAmount)) || Number(approvalAmount) <= 0)) {
+      setError('اكتب مبلغًا صحيحًا لإضافته إلى رصيد الطالب');
+      return;
+    }
     const response = await fetch(`${API_URL}/admin/recharge-requests/${requestId}/${action}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ reason, amount: Number(approvalAmount) }),
     });
     const data = await readApiResponse(response);
     if (!response.ok) { setError(data.message || 'تعذر مراجعة الطلب'); return; }
@@ -1157,9 +1168,9 @@ function App() {
               <div className="section-heading"><span className="eyebrow">Vodafone Cash</span><h2>طلبات الدفع</h2></div>
               <div className="payment-requests-list">
                 {paymentRequests.map((request) => <article key={request.id} className="payment-request-card">
-                  <div className="payment-request-info"><h3>{request.student}</h3><p><strong>مبلغ التحويل: {request.amount} جنيه مصري</strong> • الرصيد الحالي: {request.studentBalance ?? 0} جنيه مصري</p><small>الإيميل: {request.studentEmail || 'غير مسجل'} • رقم الطالب: {request.studentNumber || 'غير مسجل'} • ولي الأمر: {request.guardianPhone || 'غير مسجل'} • هاتف التحويل: {request.senderPhone || 'غير مسجل'}</small><small>{new Date(request.createdAt).toLocaleString('ar-EG')}</small></div>
+                  <div className="payment-request-info"><h3>{request.student}</h3><p><strong>مبلغ التحويل: {request.amount} جنيه مصري</strong> • الرصيد الحالي: {request.studentBalance ?? 0} جنيه مصري</p>{request.creditedAmount && <p><strong>المبلغ المضاف: {request.creditedAmount} جنيه مصري</strong></p>}<small>الإيميل: {request.studentEmail || 'غير مسجل'} • رقم الطالب: {request.studentNumber || 'غير مسجل'} • ولي الأمر: {request.guardianPhone || 'غير مسجل'} • هاتف التحويل: {request.senderPhone || 'غير مسجل'}</small><small>{new Date(request.createdAt).toLocaleString('ar-EG')}</small></div>
                   <strong className={`request-status ${request.status.toLowerCase()}`}>{request.status === 'Pending' ? 'قيد المراجعة' : request.status === 'Approved' ? 'تم الاعتماد' : 'مرفوض'}</strong>
-                  {request.status === 'Pending' && <div className="payment-request-actions"><button type="button" className="primary-btn" onClick={() => reviewPaymentRequest(request.id, 'approve')}>اعتماد وإضافة الرصيد</button><button type="button" className="small-btn danger-btn" onClick={() => reviewPaymentRequest(request.id, 'reject')}>رفض</button></div>}
+                  {request.status === 'Pending' && <div className="payment-request-actions"><label className="approval-amount-field">المبلغ الذي سيضاف للرصيد<input type="number" min="1" step="1" value={paymentApprovalAmounts[request.id] ?? request.amount} onChange={(event) => setPaymentApprovalAmounts((current) => ({ ...current, [request.id]: event.target.value }))} /></label><button type="button" className="primary-btn" onClick={() => reviewPaymentRequest(request.id, 'approve')}>اعتماد وإضافة الرصيد</button><button type="button" className="small-btn danger-btn" onClick={() => reviewPaymentRequest(request.id, 'reject')}>رفض</button></div>}
                 </article>)}
                 {!paymentRequests.length && <div className="empty-state">لا توجد طلبات دفع حتى الآن.</div>}
               </div>
