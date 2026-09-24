@@ -62,7 +62,9 @@ const rechargeSchema = new mongoose.Schema({
 }, { versionKey: false });
 const RechargeRequest = mongoose.models.RechargeRequest || mongoose.model('RechargeRequest', rechargeSchema);
 let mongoReady = false;
-const mongoConfigured = Boolean(process.env.MONGODB_URI && process.env.MONGODB_URI.trim());
+let mongoError = null;
+const mongoUri = String(process.env.MONGODB_URI || process.env.MONGO_URI || '').trim();
+const mongoConfigured = Boolean(mongoUri);
 const videoCatalog = [
   { id: 1, title: 'محاضرة تمهيدية', cover: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80', url: 'https://www.youtube.com/embed/dQw4w9WgXcQ', price: 10 },
   { id: 2, title: 'شرح الوحدة الأولى', cover: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1200&q=80', url: 'https://www.youtube.com/embed/ysz5S6PUM-U', price: 10 },
@@ -78,7 +80,7 @@ function normalizeVideoUrl(value) {
 }
 
 const connectMongo = mongoConfigured
-  ? mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
+  ? mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 10000 })
       .then(async () => {
         mongoReady = true;
         const savedUsers = await User.find().lean();
@@ -108,6 +110,7 @@ const connectMongo = mongoConfigured
         console.log(`MongoDB connected; loaded ${savedQuizzes.length} quizzes`);
       })
       .catch((error) => {
+        mongoError = error;
         console.warn(`MongoDB unavailable: ${error.message}. Continuing with in-memory mode.`);
       })
   : Promise.resolve().then(() => {
@@ -251,7 +254,16 @@ function requireAdmin(req, res, next) {
 }
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, message: 'خدمة Shefo تعمل بشكل طبيعي' });
+  res.json({ ok: true, database: mongoReady ? 'connected' : mongoConfigured ? 'connecting' : 'not-configured', message: 'خدمة Shefo تعمل بشكل طبيعي' });
+});
+
+app.use('/api', async (req, res, next) => {
+  if (!mongoConfigured) return next();
+  await connectMongo;
+  if (!mongoReady) {
+    return res.status(503).json({ message: 'قاعدة البيانات غير متاحة. راجع MONGODB_URI في إعدادات Vercel.', detail: process.env.VERCEL ? undefined : mongoError?.message });
+  }
+  next();
 });
 
 app.get('/api/public/students', (req, res) => {
