@@ -142,6 +142,12 @@ function App() {
   const [paymentRequests, setPaymentRequests] = useState([]);
   const [paymentApprovalAmounts, setPaymentApprovalAmounts] = useState({});
   const [videoPurchaseLoading, setVideoPurchaseLoading] = useState(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileName, setProfileName] = useState('');
+  const [profilePhone, setProfilePhone] = useState('');
+  const [profileGuardianPhone, setProfileGuardianPhone] = useState('');
+  const [profileAvatar, setProfileAvatar] = useState('');
+  const [profileMessage, setProfileMessage] = useState('');
 
   const scrollToLogin = () => {
     setLoginOpen(true);
@@ -534,6 +540,46 @@ function App() {
       setError(err.message || 'تعذر شراء الفيديو');
     } finally {
       setVideoPurchaseLoading(null);
+    }
+  };
+
+  const openProfile = () => {
+    setProfileName(user?.name || '');
+    setProfilePhone(user?.phone || '');
+    setProfileGuardianPhone(user?.guardianPhone || '');
+    setProfileAvatar(user?.avatar || '');
+    setProfileMessage('');
+    setProfileOpen(true);
+  };
+
+  const handleProfileImageUpload = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setProfileMessage('اختر ملف صورة صحيحًا');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setProfileAvatar(String(reader.result || ''));
+    reader.readAsDataURL(file);
+  };
+
+  const saveProfile = async (event) => {
+    event.preventDefault();
+    setProfileMessage('جاري حفظ التعديلات...');
+    try {
+      const response = await fetch(`${API_URL}/profile`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: profileName, phone: profilePhone, guardianPhone: profileGuardianPhone, avatar: profileAvatar }),
+      });
+      const data = await readApiResponse(response);
+      if (!response.ok) throw new Error(data.message || 'تعذر تحديث الملف الشخصي');
+      setUser(data.user);
+      setDashboard((current) => current ? { ...current, user: data.user } : current);
+      setProfileMessage(data.message || 'تم حفظ الملف الشخصي');
+    } catch (err) {
+      setProfileMessage(err.message || 'تعذر تحديث الملف الشخصي');
     }
   };
 
@@ -995,11 +1041,56 @@ function App() {
           </div>
           <div className="student-actions">
             <span className="balance-pill">الرصيد: {dashboard?.balance ?? 0}</span>
+            <button type="button" className="secondary-btn profile-btn" onClick={openProfile}>
+              ملفي الشخصي
+            </button>
             <button onClick={handleLogout} className="logout-btn">
               تسجيل الخروج
             </button>
           </div>
         </header>
+
+        {profileOpen && <div className="profile-modal-backdrop" onClick={() => setProfileOpen(false)}>
+          <section className="profile-modal" onClick={(event) => event.stopPropagation()}>
+            <button type="button" className="modal-close" onClick={() => setProfileOpen(false)}>×</button>
+            <div className="profile-modal-heading">
+              <span className="eyebrow">حساب الطالب</span>
+              <h2>ملفي الشخصي</h2>
+              <p>عدّل بياناتك وصورتك الشخصية ثم احفظ التغييرات.</p>
+            </div>
+            <form className="profile-form" onSubmit={saveProfile}>
+              <div className="profile-avatar-preview">
+                {profileAvatar ? <img src={profileAvatar} alt="الصورة الشخصية" /> : <span>{profileName.charAt(0) || 'ط'}</span>}
+              </div>
+              <label className="management-field">
+                الصورة الشخصية
+                <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={handleProfileImageUpload} />
+              </label>
+              <label className="management-field">
+                الاسم بالكامل
+                <input value={profileName} onChange={(event) => setProfileName(event.target.value)} required />
+              </label>
+              <label className="management-field">
+                البريد الإلكتروني
+                <input value={user.email} disabled />
+              </label>
+              <label className="management-field">
+                رقم الطالب
+                <input value={user.studentNumber || 'مسجل بالحساب'} disabled />
+              </label>
+              <label className="management-field">
+                رقم الهاتف
+                <input type="tel" value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} placeholder="رقم هاتفك" />
+              </label>
+              <label className="management-field">
+                رقم ولي الأمر
+                <input type="tel" value={profileGuardianPhone} onChange={(event) => setProfileGuardianPhone(event.target.value)} placeholder="رقم ولي الأمر" />
+              </label>
+              {profileMessage && <div className="message">{profileMessage}</div>}
+              <button type="submit" className="primary-btn">حفظ الملف الشخصي</button>
+            </form>
+          </section>
+        </div>}
 
         <div className="student-wallet">
           <div>
