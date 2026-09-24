@@ -4,7 +4,6 @@ import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
-import { PDFParse } from 'pdf-parse';
 import mongoose from 'mongoose';
 import { randomUUID } from 'node:crypto';
 
@@ -645,6 +644,7 @@ app.post('/api/admin/quizzes/import-pdf', authenticate, requireAdmin, pdfUpload.
   if (!req.file) return res.status(400).json({ message: 'اختر ملف PDF أولًا' });
   if (req.file.mimetype !== 'application/pdf') return res.status(400).json({ message: 'الملف يجب أن يكون PDF' });
   try {
+    const { PDFParse } = await import('pdf-parse');
     const parser = new PDFParse({ data: req.file.buffer });
     const parsed = await parser.getText();
     await parser.destroy();
