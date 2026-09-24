@@ -170,6 +170,23 @@ function App() {
     setLoginOpen(true);
   };
 
+  const handleHeroPointerMove = (event) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - bounds.left) / bounds.width - 0.5) * 2;
+    const y = ((event.clientY - bounds.top) / bounds.height - 0.5) * 2;
+    event.currentTarget.style.setProperty('--hero-tilt-x', `${x * 5}deg`);
+    event.currentTarget.style.setProperty('--hero-tilt-y', `${y * -5}deg`);
+    event.currentTarget.style.setProperty('--hero-shift-x', `${x * 16}px`);
+    event.currentTarget.style.setProperty('--hero-shift-y', `${y * 16}px`);
+  };
+
+  const resetHeroPointer = (event) => {
+    event.currentTarget.style.setProperty('--hero-tilt-x', '0deg');
+    event.currentTarget.style.setProperty('--hero-tilt-y', '0deg');
+    event.currentTarget.style.setProperty('--hero-shift-x', '0px');
+    event.currentTarget.style.setProperty('--hero-shift-y', '0px');
+  };
+
   const fetchDashboard = async (authToken) => {
     const response = await fetch(`${API_URL}/dashboard`, {
       headers: {
@@ -273,6 +290,21 @@ function App() {
       document.removeEventListener('dragstart', preventDrag);
     };
   }, []);
+
+  useEffect(() => {
+    if (token || !('IntersectionObserver' in window)) return undefined;
+
+    const revealObserver = new IntersectionObserver((entries, observer) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add('is-revealed');
+        observer.unobserve(entry.target);
+      });
+    }, { threshold: 0.16 });
+
+    document.querySelectorAll('[data-reveal]').forEach((element) => revealObserver.observe(element));
+    return () => revealObserver.disconnect();
+  }, [token]);
 
   useEffect(() => {
     if (!token) {
@@ -934,21 +966,21 @@ function App() {
               </div>
             </div>
 
-            <div className="hero-visual">
+            <div className="hero-visual" onMouseMove={handleHeroPointerMove} onMouseLeave={resetHeroPointer}>
               <div className="tech-orbit orbit-one" />
               <div className="tech-orbit orbit-two" />
               <div className="code-float code-float-top">{'<AI />'}</div>
               <div className="code-float code-float-bottom">محمد عبد الشافي</div>
               <div className="hero-image-card">
                 <img
-                  src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80"
+                  src="https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1200&q=85"
                   alt="تعليم البرمجة والذكاء الاصطناعي"
                 />
               </div>
             </div>
           </section>
 
-          <section id="levels" className="section-block">
+          <section id="levels" className="section-block" data-reveal>
             <div className="section-heading">
               <span className="eyebrow">المراحل الدراسية</span>
               <h2>ابدأ رحلتك في البرمجة والذكاء الاصطناعي</h2>
@@ -956,7 +988,7 @@ function App() {
 
             <div className="stage-grid">
               {publicStages.map((stage) => (
-                <article key={stage.id} className="stage-card">
+                <article key={stage.id} className="stage-card" data-reveal>
                   <div className="stage-image" style={{ backgroundImage: `url('${stage.image}')` }}>
                     <button type="button" className="stage-button" onClick={scrollToLogin}>
                       استكشف المحتوى
@@ -971,24 +1003,26 @@ function App() {
             </div>
           </section>
 
-          <section id="features" className="section-block">
+          <section id="features" className="section-block" data-reveal>
             <div className="section-heading">
               <span className="eyebrow">مميزات المنصة</span>
               <h2>تعلم المهارات التي تحتاجها في دراسة البكالوريا وسوق المستقبل</h2>
             </div>
 
             <div className="feature-grid">
-              {featureItems.map((item) => (
-                <div key={item.title} className="feature-card">
+              {featureItems.map((item, index) => (
+                <div key={item.title} className="feature-card" data-reveal>
+                  <span className="feature-index">0{index + 1}</span>
                   <span className="feature-icon">{item.icon}</span>
                   <h3>{item.title}</h3>
                   <p>{item.text}</p>
+                  <span className="feature-line" aria-hidden="true" />
                 </div>
               ))}
             </div>
           </section>
 
-          <section className="section-block community-block">
+          <section className="section-block community-block" data-reveal>
             <div className="section-heading">
               <span className="eyebrow">المجتمع</span>
               <h2>انضم إلى محادثات رائعة وتفاعل مع زملائك</h2>
@@ -1004,7 +1038,7 @@ function App() {
             </div>
           </section>
 
-          {publicStudents.length > 0 && <section id="students" className="section-block">
+          {publicStudents.length > 0 && <section id="students" className="section-block" data-reveal>
             <div className="section-heading">
               <span className="eyebrow">الطلاب المتفوقون</span>
               <h2>نجاحات تدفعنا لمزيد من التفوق</h2>
@@ -1012,7 +1046,7 @@ function App() {
 
             <div className="student-grid-public">
               {publicStudents.map((student) => (
-                <div key={student.id} className="student-card-public">
+                <div key={student.id} className="student-card-public" data-reveal>
                   <div className="avatar">{student.name.charAt(0)}</div>
                   <h3>{student.name}</h3>
                   {student.score && <strong>{student.score}</strong>}
@@ -1021,7 +1055,7 @@ function App() {
             </div>
           </section>}
 
-          <section id="about" className="section-block about-block">
+          <section id="about" className="section-block about-block" data-reveal>
             <div className="section-heading">
               <span className="eyebrow">عن المنصة</span>
               <h2>تعليم البرمجة والذكاء الاصطناعي </h2>
