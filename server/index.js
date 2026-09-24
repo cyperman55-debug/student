@@ -22,6 +22,10 @@ const quizSchema = new mongoose.Schema({
   price: { type: Number, default: 10, min: 1 },
   questions: [{ id: Number, text: String, options: [String], correctOption: Number }],
   published: { type: Boolean, default: true },
+  grade: { type: String, default: 'second-secondary' },
+  term: { type: String, default: '' },
+  unitId: { type: Number, default: 1, min: 1 },
+  packagePrice: { type: Number, default: 0, min: 0 },
   createdAt: { type: Date, default: Date.now },
 }, { versionKey: false });
 const Quiz = mongoose.models.Quiz || mongoose.model('Quiz', quizSchema);
@@ -29,6 +33,8 @@ const userSchema = new mongoose.Schema({
   id: { type: Number, required: true, unique: true },
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true, lowercase: true },
+  grade: { type: String, default: 'second-secondary' },
+  term: { type: String, default: '' },
   studentNumber: String,
   guardianPhone: String,
   phone: String,
@@ -38,7 +44,7 @@ const userSchema = new mongoose.Schema({
   status: { type: String, default: 'active' },
   balance: { type: Number, default: 0 },
   contentUnlocked: { type: Boolean, default: false },
-  contentAccess: { all: Boolean, videoIds: [Number] },
+  contentAccess: { all: Boolean, videoIds: [Number], packages: [String] },
 }, { versionKey: false });
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 const videoSchema = new mongoose.Schema({
@@ -47,6 +53,10 @@ const videoSchema = new mongoose.Schema({
   url: { type: String, required: true },
   cover: { type: String, default: '' },
   price: { type: Number, default: 10, min: 0 },
+  grade: { type: String, default: 'second-secondary' },
+  term: { type: String, default: '' },
+  unitId: { type: Number, default: 1, min: 1 },
+  packagePrice: { type: Number, default: 0, min: 0 },
 }, { versionKey: false });
 const Video = mongoose.models.Video || mongoose.model('Video', videoSchema);
 const videoPurchaseSchema = new mongoose.Schema({
@@ -85,9 +95,13 @@ let mongoError = null;
 const mongoUri = String(process.env.MONGODB_URI || process.env.MONGO_URI || '').trim();
 const mongoConfigured = Boolean(mongoUri);
 const videoCatalog = [
-  { id: 1, title: 'محاضرة تمهيدية', cover: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80', url: 'https://www.youtube.com/embed/dQw4w9WgXcQ', price: 10 },
-  { id: 2, title: 'شرح الوحدة الأولى', cover: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1200&q=80', url: 'https://www.youtube.com/embed/ysz5S6PUM-U', price: 10 },
+  { id: 1, title: 'محاضرة تمهيدية', cover: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80', url: 'https://www.youtube.com/embed/dQw4w9WgXcQ', price: 10, grade: 'second-secondary', term: '', unitId: 1, packagePrice: 50 },
+  { id: 2, title: 'شرح الوحدة الأولى', cover: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1200&q=80', url: 'https://www.youtube.com/embed/ysz5S6PUM-U', price: 10, grade: 'second-secondary', term: '', unitId: 1, packagePrice: 50 },
 ];
+
+function packageKey(grade, term, unitId) {
+  return `${String(grade || 'second-secondary')}:${String(term || 'all')}:${Number(unitId) || 1}`;
+}
 
 function normalizeVideoUrl(value) {
   const input = String(value || '').trim();
@@ -114,6 +128,10 @@ const initializeMongo = () => mongoConfigured
             id: Number(video.id),
             url: normalizeVideoUrl(video.url),
             price: Number(video.price) || 10,
+            grade: video.grade || 'second-secondary',
+            term: video.term || '',
+            unitId: Number(video.unitId) || 1,
+            packagePrice: Number(video.packagePrice) || Number(video.price) || 10,
           })));
           await Promise.all(videoCatalog.map((video) => Video.updateOne({ id: video.id }, { $set: { url: video.url } })));
         } else {
@@ -122,7 +140,7 @@ const initializeMongo = () => mongoConfigured
         const savedQuizzes = await Quiz.find().lean();
         const legacyQuizzes = savedQuizzes.filter((quiz) => !quiz.price || quiz.price < 1);
         if (legacyQuizzes.length) await Quiz.updateMany({ _id: { $in: legacyQuizzes.map((quiz) => quiz._id) } }, { $set: { price: 10 } });
-        quizzes.push(...savedQuizzes.map((quiz) => ({ ...quiz, id: String(quiz.id || quiz._id), price: Number(quiz.price) >= 1 ? Number(quiz.price) : 10 })));
+        quizzes.push(...savedQuizzes.map((quiz) => ({ ...quiz, id: String(quiz.id || quiz._id), price: Number(quiz.price) >= 1 ? Number(quiz.price) : 10, grade: quiz.grade || 'second-secondary', term: quiz.term || '', unitId: Number(quiz.unitId) || 1, packagePrice: Number(quiz.packagePrice) || Number(quiz.price) || 10 })));
         const savedRechargeRequests = await RechargeRequest.find().lean();
         rechargeRequests.push(...savedRechargeRequests.map((request) => ({ ...request, id: String(request.id || request._id) })));
         const savedVideoPurchases = await VideoPurchase.find().lean();
@@ -188,6 +206,8 @@ const users = [
     id: 2,
     name: 'الطالب',
     email: 'student@shefo.com',
+    grade: 'second-secondary',
+    term: '',
     studentNumber: 'ST-0002',
     guardianPhone: '01000000001',
     phone: '01000000000',
@@ -362,6 +382,8 @@ app.post('/api/login', async (req, res) => {
       id: user.id,
       name: user.name,
       email: user.email,
+      grade: user.grade || 'second-secondary',
+      term: user.term || '',
       role: user.role,
       balance: user.balance,
     },
@@ -370,9 +392,11 @@ app.post('/api/login', async (req, res) => {
 
 app.post('/api/auth/register', async (req, res) => {
   requireMongo(res);
-  const { name, email, studentNumber, guardianPhone, password } = req.body;
-  if (!name || !email || !studentNumber || !guardianPhone || !password || password.length < 6) {
-    return res.status(400).json({ message: 'كل البيانات مطلوبة وكلمة المرور يجب أن تكون 6 أحرف على الأقل' });
+  const { name, email, studentNumber, guardianPhone, password, grade, term } = req.body;
+  const validGrade = ['first-secondary', 'second-secondary'].includes(grade);
+  const validTerm = term === '' || (grade === 'first-secondary' && ['first-term', 'second-term'].includes(term));
+  if (!name || !email || !studentNumber || !guardianPhone || !password || password.length < 6 || !validGrade || !validTerm) {
+    return res.status(400).json({ message: 'كل البيانات مطلوبة مع اختيار الصف الدراسي الصحيح، وكلمة المرور يجب أن تكون 6 أحرف على الأقل' });
   }
   if (users.some((item) => item.email.toLowerCase() === String(email).toLowerCase())) {
     return res.status(409).json({ message: 'البريد الإلكتروني مستخدم بالفعل' });
@@ -385,6 +409,8 @@ app.post('/api/auth/register', async (req, res) => {
     id: Math.max(...users.map((item) => item.id)) + 1,
     name: String(name).trim(),
     email: String(email).trim().toLowerCase(),
+    grade,
+    term: term || '',
     studentNumber: String(studentNumber).trim(),
     guardianPhone: String(guardianPhone).trim(),
     phone: String(guardianPhone).trim(),
@@ -399,7 +425,7 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(500).json({ message: 'تعذر حفظ الحساب في قاعدة البيانات' });
   }
   users.push(user);
-  res.status(201).json({ token: generateToken(user), user: { id: user.id, name: user.name, email: user.email, studentNumber: user.studentNumber, guardianPhone: user.guardianPhone, role: user.role, balance: user.balance } });
+  res.status(201).json({ token: generateToken(user), user: { id: user.id, name: user.name, email: user.email, studentNumber: user.studentNumber, guardianPhone: user.guardianPhone, grade: user.grade, term: user.term, role: user.role, balance: user.balance } });
 });
 
 app.get('/api/profile', authenticate, (req, res) => {
@@ -414,6 +440,8 @@ app.get('/api/profile', authenticate, (req, res) => {
       id: user.id,
       name: user.name,
       email: user.email,
+      grade: user.grade || 'second-secondary',
+      term: user.term || '',
       role: user.role,
       studentNumber: user.studentNumber || '',
       phone: user.phone || '',
@@ -606,6 +634,8 @@ app.get('/api/dashboard', authenticate, (req, res) => {
         id: currentUser.id,
         name: currentUser.name,
         email: currentUser.email,
+        grade: currentUser.grade || 'second-secondary',
+        term: currentUser.term || '',
         role: currentUser.role,
         studentNumber: currentUser.studentNumber || '',
         phone: currentUser.phone || '',
@@ -617,25 +647,31 @@ app.get('/api/dashboard', authenticate, (req, res) => {
     });
   }
 
-  const videos = videoCatalog.map((video) => {
+  const studentVideos = videoCatalog.filter((video) => video.grade === (currentUser.grade || 'second-secondary') && (currentUser.grade === 'first-secondary' || !video.term || video.term === (currentUser.term || '')));
+  const videos = studentVideos.map((video) => {
+    const key = packageKey(video.grade, video.term, video.unitId);
     const open = currentUser.contentUnlocked
       || currentUser.contentAccess?.all
+      || currentUser.contentAccess?.packages?.includes(key)
       || currentUser.contentAccess?.videoIds?.includes(video.id)
       || videoPurchases.some((purchase) => purchase.videoId === video.id && purchase.studentId === currentUser.id);
-    return { ...video, purchased: open, locked: !open };
+    return { ...video, packageKey: key, packagePurchased: currentUser.contentAccess?.packages?.includes(key), purchased: open, locked: !open };
   });
+  const studentQuizzes = quizzes.filter((quiz) => quiz.published && quiz.grade === (currentUser.grade || 'second-secondary') && (currentUser.grade === 'first-secondary' || !quiz.term || quiz.term === (currentUser.term || '')));
 
   return res.json({
     role: 'student',
     balance: currentUser.balance,
     hasPaid: currentUser.balance > 0 || currentUser.contentUnlocked,
     contentUnlocked: currentUser.contentUnlocked,
-    quizzes: quizzes.filter((quiz) => quiz.published).map(({ questions, ...quiz }) => ({ ...quiz, purchased: quiz.price === 0 || quizPurchases.some((purchase) => purchase.quizId === quiz.id && purchase.studentId === currentUser.id), questionCount: questions.length })),
+    quizzes: studentQuizzes.map(({ questions, ...quiz }) => ({ ...quiz, packageKey: packageKey(quiz.grade, quiz.term, quiz.unitId), purchased: quiz.packagePrice === 0 || currentUser.contentAccess?.packages?.includes(packageKey(quiz.grade, quiz.term, quiz.unitId)) || quiz.price === 0 || quizPurchases.some((purchase) => purchase.quizId === quiz.id && purchase.studentId === currentUser.id), questionCount: questions.length })),
     attempts: quizAttempts.filter((attempt) => attempt.studentId === currentUser.id),
     user: {
       id: currentUser.id,
       name: currentUser.name,
       email: currentUser.email,
+      grade: currentUser.grade || 'second-secondary',
+      term: currentUser.term || '',
       role: currentUser.role,
       studentNumber: currentUser.studentNumber || '',
       phone: currentUser.phone || '',
@@ -648,13 +684,53 @@ app.get('/api/dashboard', authenticate, (req, res) => {
   });
 });
 
+app.post('/api/packages/:packageKey/purchase', authenticate, async (req, res) => {
+  const student = users.find((item) => item.id === req.user.id && item.role === 'student');
+  if (!student) return res.status(403).json({ message: 'هذه العملية خاصة بالطلاب فقط' });
+  const requestedKey = String(req.params.packageKey);
+  const matchingVideos = videoCatalog.filter((video) => packageKey(video.grade, video.term, video.unitId) === requestedKey);
+  const matchingQuizzes = quizzes.filter((quiz) => quiz.published && packageKey(quiz.grade, quiz.term, quiz.unitId) === requestedKey);
+  if (!matchingVideos.length && !matchingQuizzes.length) return res.status(404).json({ message: 'الباكدج غير موجودة' });
+  const packagePrice = Number(matchingVideos[0]?.packagePrice ?? matchingQuizzes[0]?.packagePrice ?? 0);
+  const packages = Array.isArray(student.contentAccess?.packages) ? student.contentAccess.packages : [];
+  if (packages.includes(requestedKey)) return res.json({ success: true, purchased: true, balance: student.balance });
+  if (student.balance < packagePrice) return res.status(402).json({ message: `رصيدك غير كافٍ. سعر الباكدج ${packagePrice} جنيه مصري` });
+  student.balance -= packagePrice;
+  student.contentAccess = { ...(student.contentAccess || {}), packages: [...packages, requestedKey] };
+  if (mongoReady) await User.updateOne({ id: student.id }, { $set: { balance: student.balance, contentAccess: student.contentAccess } });
+  res.json({ success: true, purchased: true, balance: student.balance });
+});
+
+app.patch('/api/admin/packages/:packageKey', authenticate, requireAdmin, async (req, res) => {
+  const price = Number(req.body.price);
+  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ message: 'سعر الوحدة يجب أن يكون صفرًا أو أكثر' });
+  const requestedKey = String(req.params.packageKey);
+  const matchingVideos = videoCatalog.filter((video) => packageKey(video.grade, video.term, video.unitId) === requestedKey);
+  const matchingQuizzes = quizzes.filter((quiz) => packageKey(quiz.grade, quiz.term, quiz.unitId) === requestedKey);
+  if (!matchingVideos.length && !matchingQuizzes.length) return res.status(404).json({ message: 'الوحدة لا تحتوي على محتوى بعد' });
+  matchingVideos.forEach((video) => { video.packagePrice = price; });
+  matchingQuizzes.forEach((quiz) => { quiz.packagePrice = price; });
+  if (mongoReady) {
+    await Promise.all([
+      Video.updateMany({ id: { $in: matchingVideos.map((video) => video.id) } }, { $set: { packagePrice: price } }),
+      Quiz.updateMany({ id: { $in: matchingQuizzes.map((quiz) => quiz.id) } }, { $set: { packagePrice: price } }),
+    ]);
+  }
+  res.json({ videos: videoCatalog, quizzes });
+});
+
 app.post('/api/admin/videos', authenticate, requireAdmin, async (req, res) => {
   const title = String(req.body.title || '').trim();
   const url = normalizeVideoUrl(req.body.url);
   const cover = String(req.body.cover || '').trim();
   const price = Number(req.body.price ?? 10);
+  const grade = ['first-secondary', 'second-secondary'].includes(req.body.grade) ? req.body.grade : 'second-secondary';
+  const term = grade === 'first-secondary' && ['first-term', 'second-term'].includes(req.body.term) ? req.body.term : '';
+  const unitId = Number(req.body.unitId) || 1;
+  const packagePrice = Number(req.body.packagePrice ?? price);
   if (!title || !url) return res.status(400).json({ message: 'عنوان الفيديو ورابطه مطلوبان' });
   if (!Number.isFinite(price) || price < 0) return res.status(400).json({ message: 'سعر الفيديو يجب أن يكون صفرًا أو أكثر' });
+  if (!Number.isFinite(packagePrice) || packagePrice < 0) return res.status(400).json({ message: 'سعر الباكدج يجب أن يكون صفرًا أو أكثر' });
 
   const video = {
     id: videoCatalog.length ? Math.max(...videoCatalog.map((item) => Number(item.id))) + 1 : 1,
@@ -662,6 +738,10 @@ app.post('/api/admin/videos', authenticate, requireAdmin, async (req, res) => {
     url,
     cover: cover || 'https://images.unsplash.com/photo-1516321165247-4aa89a48be28?auto=format&fit=crop&w=1200&q=80',
     price,
+    grade,
+    term,
+    unitId,
+    packagePrice,
   };
   videoCatalog.unshift(video);
   if (mongoReady) await Video.create(video);
@@ -680,11 +760,15 @@ app.patch('/api/admin/videos/:id', authenticate, requireAdmin, async (req, res) 
 
   video.title = title;
   video.price = price;
+  if (req.body.grade) video.grade = req.body.grade;
+  if (req.body.term !== undefined) video.term = String(req.body.term || '');
+  if (req.body.unitId !== undefined) video.unitId = Number(req.body.unitId) || 1;
+  if (req.body.packagePrice !== undefined) video.packagePrice = Number(req.body.packagePrice) || 0;
   if (req.body.url) video.url = normalizeVideoUrl(req.body.url);
   if (req.body.cover) video.cover = String(req.body.cover).trim();
 
   if (mongoReady) {
-    await Video.updateOne({ id: video.id }, { $set: { title: video.title, url: video.url, cover: video.cover, price: video.price } });
+    await Video.updateOne({ id: video.id }, { $set: { title: video.title, url: video.url, cover: video.cover, price: video.price, grade: video.grade, term: video.term, unitId: video.unitId, packagePrice: video.packagePrice } });
   }
 
   res.json({ video, videos: videoCatalog });
@@ -845,12 +929,17 @@ app.post('/api/admin/quizzes/import-pdf', authenticate, requireAdmin, pdfUpload.
 app.post('/api/admin/quizzes', authenticate, requireAdmin, async (req, res) => {
   requireMongo(res);
   const { title, description = '', price = 0, questions = [], published = true } = req.body;
+  const grade = ['first-secondary', 'second-secondary'].includes(req.body.grade) ? req.body.grade : 'second-secondary';
+  const term = grade === 'first-secondary' && ['first-term', 'second-term'].includes(req.body.term) ? req.body.term : '';
+  const unitId = Number(req.body.unitId) || 1;
+  const packagePrice = Number(req.body.packagePrice ?? price);
   if (!title?.trim() || !Array.isArray(questions) || questions.length === 0) return res.status(400).json({ message: 'اسم الاختبار وسؤال واحد على الأقل مطلوبان' });
   const normalizedQuestions = questions.map((question, index) => ({ id: index + 1, text: String(question.text || '').trim(), options: Array.isArray(question.options) ? question.options.map(String).filter(Boolean).slice(0, 6) : [], correctOption: Number(question.correctOption) }));
   if (normalizedQuestions.some((question) => !question.text || question.options.length < 2 || !Number.isInteger(question.correctOption) || !question.options[question.correctOption])) return res.status(400).json({ message: 'كل سؤال يجب أن يحتوي على اختيارات وإجابة صحيحة' });
   const numericPrice = Number(price);
-  if (!Number.isFinite(numericPrice) || numericPrice < 1) return res.status(400).json({ message: 'سعر الاختبار يجب أن يكون جنيهًا مصريًا واحدًا على الأقل' });
-  const quiz = { id: randomUUID(), title: title.trim(), description: String(description), price: numericPrice, questions: normalizedQuestions, published: Boolean(published), createdAt: new Date().toISOString() };
+  if (!Number.isFinite(numericPrice) || numericPrice < 0) return res.status(400).json({ message: 'سعر الاختبار يجب أن يكون صفرًا أو أكثر' });
+  if (!Number.isFinite(packagePrice) || packagePrice < 0) return res.status(400).json({ message: 'سعر الباكدج يجب أن يكون صفرًا أو أكثر' });
+  const quiz = { id: randomUUID(), title: title.trim(), description: String(description), price: numericPrice, packagePrice, grade, term, unitId, questions: normalizedQuestions, published: Boolean(published), createdAt: new Date().toISOString() };
   try {
     await Quiz.create(quiz);
   } catch (error) {

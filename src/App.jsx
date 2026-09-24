@@ -4,6 +4,23 @@ const API_URL = '/api';
 const SESSION_TOKEN_KEY = 'shefo-token';
 const LAST_ACTIVITY_KEY = 'shefo-last-activity';
 const INACTIVITY_LIMIT = 5 * 60 * 1000;
+const gradeOptions = [
+  { value: 'first-secondary', label: 'أولى ثانوي' },
+  { value: 'second-secondary', label: 'تانية ثانوي' },
+];
+const termOptions = [
+  { value: 'first-term', label: 'الترم الأول' },
+  { value: 'second-term', label: 'الترم الثاني' },
+];
+const secondSecondaryUnits = Array.from({ length: 7 }, (_, index) => ({ id: index + 1, label: `الوحدة ${index + 1}` }));
+const firstSecondaryUnits = termOptions.map((term) => ({ id: term.value, label: term.label }));
+
+function formatContentLocation(item) {
+  if (item.grade === 'first-secondary') {
+    return item.term === 'second-term' ? 'أولى ثانوي - الترم الثاني' : 'أولى ثانوي - الترم الأول';
+  }
+  return `تانية ثانوي - الوحدة ${item.unitId || 1}`;
+}
 
 async function readApiResponse(response) {
   const contentType = response.headers.get('content-type') || '';
@@ -81,6 +98,10 @@ const defaultVideos = [
     cover:
       'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80',
     locked: true,
+    grade: 'second-secondary',
+    term: '',
+    unitId: 1,
+    packagePrice: 50,
   },
   {
     id: 2,
@@ -89,6 +110,10 @@ const defaultVideos = [
     cover:
       'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1200&q=80',
     locked: true,
+    grade: 'second-secondary',
+    term: '',
+    unitId: 1,
+    packagePrice: 50,
   },
 ];
 
@@ -100,6 +125,7 @@ function App() {
   const [fullName, setFullName] = useState('');
   const [studentNumber, setStudentNumber] = useState('');
   const [guardianPhone, setGuardianPhone] = useState('');
+  const [registrationGrade, setRegistrationGrade] = useState('second-secondary');
   const [token, setToken] = useState(localStorage.getItem(SESSION_TOKEN_KEY) || '');
   const [user, setUser] = useState(null);
   const [dashboard, setDashboard] = useState(null);
@@ -109,12 +135,14 @@ function App() {
   const [videoTitle, setVideoTitle] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
   const [videoCover, setVideoCover] = useState('');
-  const [videoPrice, setVideoPrice] = useState('10');
+  const [videoGrade, setVideoGrade] = useState('second-secondary');
+  const [videoTerm, setVideoTerm] = useState('');
+  const [videoUnitId, setVideoUnitId] = useState('1');
+  const [packagePriceDrafts, setPackagePriceDrafts] = useState({});
   const [videoFormError, setVideoFormError] = useState('');
   const [editingVideoId, setEditingVideoId] = useState(null);
   const [editingVideoTitle, setEditingVideoTitle] = useState('');
   const [editingVideoCover, setEditingVideoCover] = useState('');
-  const [editingVideoPrice, setEditingVideoPrice] = useState('10');
   const [videos, setVideos] = useState(defaultVideos);
   const [selectedVideo, setSelectedVideo] = useState(defaultVideos[0]);
   const [publicStudents, setPublicStudents] = useState([]);
@@ -147,7 +175,9 @@ function App() {
   const [pdfPreview, setPdfPreview] = useState(null);
   const [pdfImportMessage, setPdfImportMessage] = useState('');
   const [pdfSaving, setPdfSaving] = useState(false);
-  const [quizPrice, setQuizPrice] = useState('0');
+  const [quizGrade, setQuizGrade] = useState('second-secondary');
+  const [quizTerm, setQuizTerm] = useState('');
+  const [quizUnitId, setQuizUnitId] = useState('1');
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentSettings, setPaymentSettings] = useState(null);
   const [rechargeRequests, setRechargeRequests] = useState([]);
@@ -158,6 +188,7 @@ function App() {
   const [paymentRequests, setPaymentRequests] = useState([]);
   const [paymentApprovalAmounts, setPaymentApprovalAmounts] = useState({});
   const [videoPurchaseLoading, setVideoPurchaseLoading] = useState(null);
+  const [selectedPackageKey, setSelectedPackageKey] = useState(null);
   const protectedVideoRef = useRef(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileName, setProfileName] = useState('');
@@ -521,12 +552,12 @@ function App() {
     event.preventDefault();
     const response = await fetch(`${API_URL}/admin/quizzes`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ title: quizTitle, description: quizDescription, price: Number(quizPrice), questions: [{ text: questionText, options: questionOptions, correctOption: Number(correctOption) }] }),
+      body: JSON.stringify({ title: quizTitle, description: quizDescription, price: 0, packagePrice: 0, grade: quizGrade, term: quizGrade === 'first-secondary' ? quizTerm : '', unitId: Number(quizUnitId), questions: [{ text: questionText, options: questionOptions, correctOption: Number(correctOption) }] }),
     });
     const data = await readApiResponse(response);
     if (!response.ok) { setError(data.message || 'تعذر إنشاء الاختبار'); return; }
     setQuizList((current) => [...current, data.quiz]);
-    setQuizTitle(''); setQuizDescription(''); setQuizPrice('0'); setQuestionText(''); setQuestionOptions(['', '', '', '']); setCorrectOption('0');
+    setQuizTitle(''); setQuizDescription(''); setQuizGrade('second-secondary'); setQuizTerm(''); setQuizUnitId('1'); setQuestionText(''); setQuestionOptions(['', '', '', '']); setCorrectOption('0');
     setStudentActionMessage('تم إنشاء الاختبار وإضافته إلى بنك الأسئلة.');
   };
 
@@ -588,7 +619,7 @@ function App() {
     try {
       const response = await fetch(`${API_URL}/admin/quizzes`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ title: quizTitle, description: quizDescription, price: Number(quizPrice), questions: pdfPreview.questions }),
+        body: JSON.stringify({ title: quizTitle, description: quizDescription, price: 0, packagePrice: 0, grade: quizGrade, term: quizGrade === 'first-secondary' ? quizTerm : '', unitId: Number(quizUnitId), questions: pdfPreview.questions }),
       });
       const data = await readApiResponse(response);
       if (!response.ok) { setPdfImportMessage(data.message || 'تعذر حفظ الاختبار'); return; }
@@ -613,7 +644,11 @@ function App() {
     setError('');
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/quizzes/${quizId}/purchase`, {
+      const quiz = (dashboard?.quizzes || []).find((item) => item.id === quizId);
+      const purchasePath = quiz?.packageKey
+        ? `${API_URL}/packages/${encodeURIComponent(quiz.packageKey)}/purchase`
+        : `${API_URL}/quizzes/${quizId}/purchase`;
+      const response = await fetch(purchasePath, {
         method: 'POST', headers: { Authorization: `Bearer ${token}` },
       });
       const data = await readApiResponse(response);
@@ -622,7 +657,7 @@ function App() {
       setDashboard((current) => current ? {
         ...current,
         balance: data.balance,
-        quizzes: current.quizzes.map((quiz) => quiz.id === quizId ? { ...quiz, purchased: true } : quiz),
+        quizzes: current.quizzes.map((item) => item.packageKey === quiz?.packageKey || item.id === quizId ? { ...item, purchased: true } : item),
       } : current);
     } catch (err) {
       setError(err.message || 'تعذر شراء الاختبار');
@@ -673,6 +708,24 @@ function App() {
       if (unlockedVideo) setSelectedVideo(unlockedVideo);
     } catch (err) {
       setError(err.message || 'تعذر شراء الفيديو');
+    } finally {
+      setVideoPurchaseLoading(null);
+    }
+  };
+
+  const purchasePackage = async (contentPackage) => {
+    setError('');
+    setVideoPurchaseLoading(contentPackage.packageKey);
+    try {
+      const response = await fetch(`${API_URL}/packages/${encodeURIComponent(contentPackage.packageKey)}/purchase`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const data = await readApiResponse(response);
+      if (!response.ok) { setError(data.message || 'تعذر شراء الباكدج'); return; }
+      const refreshed = await fetchDashboard(token);
+      setDashboard(refreshed);
+      setUser(refreshed.user);
+      setVideos(refreshed.videos || defaultVideos);
+    } catch (err) {
+      setError(err.message || 'تعذر شراء الباكدج');
     } finally {
       setVideoPurchaseLoading(null);
     }
@@ -749,7 +802,7 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(registerMode
-          ? { name: fullName, email, studentNumber, guardianPhone, password }
+          ? { name: fullName, email, studentNumber, guardianPhone, password, grade: registrationGrade, term: '' }
           : { email, password }),
       });
 
@@ -822,7 +875,7 @@ function App() {
       const response = await fetch(`${API_URL}/admin/videos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ title: videoTitle, url: videoUrl, cover: videoCover, price: Number(videoPrice) }),
+        body: JSON.stringify({ title: videoTitle, url: videoUrl, cover: videoCover, price: 0, grade: videoGrade, term: videoGrade === 'first-secondary' ? videoTerm : '', unitId: Number(videoUnitId), packagePrice: 0 }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'تعذر حفظ الفيديو');
@@ -831,11 +884,34 @@ function App() {
       setVideoTitle('');
       setVideoUrl('');
       setVideoCover('');
-      setVideoPrice('10');
+      setVideoGrade('second-secondary');
+      setVideoTerm('');
+      setVideoUnitId('1');
       setVideoFormError('');
     } catch (err) {
       setVideoFormError(err.message || 'تعذر حفظ الفيديو');
     }
+  };
+
+  const savePackagePrice = async (packageKey) => {
+    const price = Number(packagePriceDrafts[packageKey]);
+    if (!Number.isFinite(price) || price < 0) {
+      setError('اكتب سعرًا صحيحًا للوحدة');
+      return;
+    }
+    const response = await fetch(`${API_URL}/admin/packages/${encodeURIComponent(packageKey)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ price }),
+    });
+    const data = await readApiResponse(response);
+    if (!response.ok) {
+      setError(data.message || 'تعذر حفظ سعر الوحدة');
+      return;
+    }
+    setVideos(data.videos || videos);
+    setQuizList((current) => current.map((quiz) => data.quizzes?.find((item) => item.id === quiz.id) || quiz));
+    setStudentActionMessage('تم حفظ سعر الوحدة وتطبيقه على محتواها.');
   };
 
   const handleLocalCoverUpload = (event, setCoverValue) => {
@@ -853,7 +929,6 @@ function App() {
     setEditingVideoId(video.id);
     setEditingVideoTitle(video.title);
     setEditingVideoCover(video.cover || '');
-    setEditingVideoPrice(String(video.price ?? 10));
     setVideoFormError('');
   };
 
@@ -861,7 +936,6 @@ function App() {
     setEditingVideoId(null);
     setEditingVideoTitle('');
     setEditingVideoCover('');
-    setEditingVideoPrice('10');
   };
 
   const saveEditedVideo = async () => {
@@ -869,13 +943,8 @@ function App() {
     if (!video) return;
 
     const trimmedTitle = editingVideoTitle.trim();
-    const parsedPrice = Number(editingVideoPrice);
     if (!trimmedTitle) {
       setVideoFormError('اسم الفيديو لا يمكن أن يكون فارغًا');
-      return;
-    }
-    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
-      setVideoFormError('سعر الفيديو يجب أن يكون عددًا صحيحًا أو صفرًا');
       return;
     }
 
@@ -883,7 +952,7 @@ function App() {
       const response = await fetch(`${API_URL}/admin/videos/${video.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ title: trimmedTitle, url: video.url, cover: editingVideoCover || video.cover, price: parsedPrice }),
+        body: JSON.stringify({ title: trimmedTitle, url: video.url, cover: editingVideoCover || video.cover, price: 0 }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'تعذر تعديل الفيديو');
@@ -952,6 +1021,10 @@ function App() {
               <div className="hero-stats">
                 <div>
                   <strong>2 ث</strong>
+                  <span>نظام البكالوريا</span>
+                </div>
+                <div>
+                  <strong>1 ث</strong>
                   <span>نظام البكالوريا</span>
                 </div>
                 <div>
@@ -1071,6 +1144,12 @@ function App() {
                     رقم ولي الأمر
                     <input type="tel" value={guardianPhone} onChange={(event) => setGuardianPhone(event.target.value)} required />
                   </label>
+                  <label>
+                    الصف الدراسي
+                    <select value={registrationGrade} onChange={(event) => setRegistrationGrade(event.target.value)} required>
+                      {gradeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
                 </>
               )}
               <label>
@@ -1125,6 +1204,24 @@ function App() {
   }
 
   if (user?.role === 'student') {
+    const packageDefinitions = user.grade === 'first-secondary'
+      ? firstSecondaryUnits.map((unit) => ({ grade: user.grade, term: unit.id, unitId: 1, packagePrice: 0 }))
+      : secondSecondaryUnits.map((unit) => ({ grade: user.grade || 'second-secondary', term: '', unitId: unit.id, packagePrice: 0 }));
+    const studentPackages = packageDefinitions.reduce((packages, definition) => {
+      const key = `${definition.grade}:${definition.term || 'all'}:${definition.unitId}`;
+      packages[key] = { packageKey: key, grade: definition.grade, term: definition.term, unitId: definition.unitId, packagePrice: definition.packagePrice, videos: [], quizzes: [], purchased: false };
+      return packages;
+    }, {});
+
+    [...videos.map((video) => ({ ...video, contentType: 'video' })), ...(dashboard?.quizzes || []).map((quiz) => ({ ...quiz, contentType: 'quiz' }))].reduce((packages, item) => {
+      const key = item.packageKey || `${item.grade || user.grade}:${item.term || user.term || 'all'}:${item.unitId || 1}`;
+      if (!packages[key]) packages[key] = { packageKey: key, grade: item.grade || user.grade, term: item.term || user.term || '', unitId: item.unitId || 1, packagePrice: item.packagePrice || 0, videos: [], quizzes: [], purchased: Boolean(item.purchased || item.packagePurchased) };
+      packages[key][item.contentType === 'video' ? 'videos' : 'quizzes'].push(item);
+      packages[key].purchased = packages[key].purchased || Boolean(item.purchased || item.packagePurchased);
+      packages[key].packagePrice = packages[key].packagePrice || Number(item.packagePrice || 0);
+      return packages;
+    }, studentPackages);
+
     if (selectedQuiz) {
       return (
         <div className="quiz-page-shell">
@@ -1257,34 +1354,60 @@ function App() {
 
         {error && <div className="error-box">{error}</div>}
 
-        <section className="student-grid">
-          {videos.map((video) => (
-            <div key={video.id} className={`student-video-card ${video.locked ? 'locked' : ''}`}>
-              <div className="video-cover" style={{ backgroundImage: `url('${video.cover}')` }}>
-                {video.locked && <span className="lock-badge">🔒</span>}
-              </div>
+        <section className="student-packages">
+          <div className="section-heading">
+            <span className="eyebrow">محتوى صفك الدراسي</span>
+            <h2>المحتوى التعليمي الخاص بـ {user.grade === 'first-secondary' ? 'الصف الأول الثانوي' : 'الصف الثاني الثانوي'} نظام البكالوريا</h2>
+          </div>
+          <div className="package-grid">
+            {Object.values(studentPackages).map((contentPackage) => {
+              const isExpanded = selectedPackageKey === contentPackage.packageKey;
+              return <article key={contentPackage.packageKey} className={`package-card ${isExpanded ? 'expanded' : ''}`}>
+                <span className="package-price">{contentPackage.packagePrice > 0 ? `${contentPackage.packagePrice} جنيه` : 'السعر قريبًا'}</span>
+                <button type="button" className="package-summary" onClick={() => setSelectedPackageKey((current) => current === contentPackage.packageKey ? null : contentPackage.packageKey)}>
+                  <span className="eyebrow">{contentPackage.grade === 'first-secondary' ? contentPackage.term === 'first-term' ? 'أولى ثانوي - الترم الأول' : 'أولى ثانوي - الترم الثاني' : `تانية ثانوي - الوحدة ${contentPackage.unitId}`}</span>
+                  <h3>{contentPackage.videos.length || contentPackage.quizzes.length ? `${contentPackage.videos.length} فيديو • ${contentPackage.quizzes.length} اختبار` : 'قريبًا'}</h3>
+                  <span className="package-open-label">{isExpanded ? 'إخفاء المحتوى ▲' : 'عرض محتوى الوحدة ▼'}</span>
+                </button>
 
-              <div className="student-video-meta">
-                <h4>{video.title}</h4>
-                {video.locked ? (
-                  <button type="button" className="pay-btn" onClick={() => purchaseVideo(video)} disabled={videoPurchaseLoading === video.id}>
-                    {videoPurchaseLoading === video.id ? 'جاري الشراء...' : `شراء الفيديو - ${video.price || 10} جنيه`}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="watch-btn"
-                    onClick={async () => {
-                      setSelectedVideo(video);
-                      await fetch(`${API_URL}/videos/${video.id}/view`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-                    }}
-                  >
-                    مشاهدة الفيديو
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
+                {isExpanded && <div className="package-content">
+                  <div className="package-content-header">
+                    <strong>{contentPackage.videos.length} فيديو و{contentPackage.quizzes.length} اختبار</strong>
+                    {!contentPackage.purchased && (contentPackage.videos.length || contentPackage.quizzes.length) > 0 && <button type="button" className="pay-btn" onClick={() => purchasePackage(contentPackage)} disabled={videoPurchaseLoading === contentPackage.packageKey}>
+                      {videoPurchaseLoading === contentPackage.packageKey ? 'جاري الشراء...' : `شراء الوحدة - ${contentPackage.packagePrice} جنيه`}
+                    </button>}
+                    {contentPackage.purchased && <span className="package-unlocked">الوحدة مفعّلة</span>}
+                  </div>
+
+                  <div className="package-video-list">
+                    {contentPackage.videos.map((video) => <article key={video.id} className={`package-video-item ${!contentPackage.purchased ? 'locked' : ''}`}>
+                      <div className="package-video-cover" style={{ backgroundImage: `url('${video.cover}')` }}>
+                        {!contentPackage.purchased && <span className="lock-badge">🔒</span>}
+                      </div>
+                      <div className="package-video-info">
+                        <h4>{video.title}</h4>
+                        <button type="button" className={contentPackage.purchased ? 'watch-btn' : 'small-btn'} onClick={async () => { if (!contentPackage.purchased) return; setSelectedVideo(video); await fetch(`${API_URL}/videos/${video.id}/view`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } }); }} disabled={!contentPackage.purchased}>
+                          {contentPackage.purchased ? 'مشاهدة الفيديو' : 'مغلق حتى الدفع'}
+                        </button>
+                      </div>
+                    </article>)}
+                  </div>
+
+                  <div className="package-quiz-list">
+                    <h4>اختبارات الوحدة ({contentPackage.quizzes.length})</h4>
+                    {contentPackage.quizzes.map((quiz) => <div key={quiz.id} className={`package-quiz-item ${!contentPackage.purchased ? 'locked' : ''}`}>
+                      <span>اختبار: {quiz.title}</span>
+                      <button type="button" className={contentPackage.purchased ? 'primary-btn' : 'small-btn'} onClick={() => contentPackage.purchased && startQuiz(quiz.id)} disabled={!contentPackage.purchased || loading}>
+                        {contentPackage.purchased ? 'دخول الاختبار' : 'مغلق حتى الدفع'}
+                      </button>
+                    </div>)}
+                    {!contentPackage.quizzes.length && <p className="package-empty">لا توجد اختبارات مضافة لهذه الوحدة بعد.</p>}
+                  </div>
+                </div>}
+              </article>;
+            })}
+            {!Object.keys(studentPackages).length && <div className="empty-state">لا يوجد محتوى متاح لصفك حتى الآن.</div>}
+          </div>
         </section>
 
         {selectedVideo && !selectedVideo.locked && (
@@ -1307,25 +1430,6 @@ function App() {
             </div>
           </section>
         )}
-
-        <section className="student-quizzes">
-          <div className="section-heading">
-            <span className="eyebrow">بنك الأسئلة</span>
-            <h2>اختباراتك التعليمية</h2>
-          </div>
-          <div className="quiz-card-grid">
-            {(dashboard?.quizzes || []).map((quiz) => {
-              const attempt = (dashboard?.attempts || []).find((item) => item.quizId === quiz.id);
-              return <article key={quiz.id} className="quiz-card">
-                <h3>{quiz.title}</h3>
-                <p>{quiz.description}</p>
-                <span>{quiz.questionCount} أسئلة • {quiz.price > 0 ? `${quiz.price} جنيه مصري` : 'مجاني'} {attempt ? `• آخر درجة ${attempt.score}/${attempt.total}` : ''}</span>
-                <button type="button" className="primary-btn" onClick={() => startQuiz(quiz.id)} disabled={loading}>{loading ? 'جاري التحقق...' : quiz.purchased ? 'ابدأ الاختبار' : quiz.price > 0 ? 'شراء وبدء الاختبار' : 'ابدأ الاختبار'}</button>
-              </article>;
-            })}
-            {!dashboard?.quizzes?.length && <div className="empty-state">لا توجد اختبارات متاحة حاليًا.</div>}
-          </div>
-        </section>
 
         <section className="chat-launcher student-chat-launcher">
           <div>
@@ -1455,19 +1559,11 @@ function App() {
               <form className="pdf-import-card panel" onSubmit={importPdf}>
                 <div><h3>استيراد اختبار من PDF</h3><p>اكتب اسم الاختبار، ثم ارفع ملفًا يحتوي على أسئلة مرقمة واختيارات A/B/C/D أو أ/ب/ج/د، مع الإجابات في نهاية الملف أو بعد كل سؤال.</p></div>
                 <label className="management-field">اسم الاختبار<input value={quizTitle} onChange={(event) => setQuizTitle(event.target.value)} placeholder="مثال: اختبار الوحدة الأولى" required /></label>
-                <label className="management-field">سعر الاختبار بالجنيه المصري<input type="number" min="0" value={quizPrice} onChange={(event) => setQuizPrice(event.target.value)} /></label>
+                <label className="management-field">الصف الدراسي<select value={quizGrade} onChange={(event) => { setQuizGrade(event.target.value); setQuizTerm(''); setQuizUnitId('1'); }}>{gradeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+                {quizGrade === 'first-secondary' ? <label className="management-field">الترم<select value={quizTerm} onChange={(event) => setQuizTerm(event.target.value)} required><option value="">اختر الترم</option>{termOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label> : <label className="management-field">الوحدة<select value={quizUnitId} onChange={(event) => setQuizUnitId(event.target.value)}>{secondSecondaryUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.label}</option>)}</select></label>}
                 <div className="pdf-import-row"><input type="file" accept="application/pdf" onChange={(event) => setPdfFile(event.target.files?.[0] || null)} required /><button type="submit" className="primary-btn">تحليل PDF</button></div>
                 {pdfImportMessage && <div className="message">{pdfImportMessage}</div>}
                 {pdfPreview && <div className="pdf-preview">{pdfPreview.questions.map((question) => <div key={question.id} className="pdf-question-preview"><strong>{question.id}. {question.text}</strong><div>{question.options.map((option, index) => <label key={option}><input type="radio" name={`pdf-${question.id}`} checked={question.correctOption === index} onChange={() => setPdfPreview((current) => ({ ...current, questions: current.questions.map((item) => item.id === question.id ? { ...item, correctOption: index } : item) }))} /> {option}</label>)}</div></div>)}<button type="button" className="primary-btn" onClick={savePdfQuiz} disabled={pdfSaving}>{pdfSaving ? 'جاري الحفظ في قاعدة البيانات...' : 'حفظ الاختبار بعد المراجعة'}</button></div>}
-              </form>
-              <form className="quiz-builder panel" onSubmit={createQuiz}>
-                <label className="management-field">اسم الاختبار<input value={quizTitle} onChange={(event) => setQuizTitle(event.target.value)} placeholder="مثال: اختبار أساسيات البرمجة" required /></label>
-                <label className="management-field">وصف الاختبار<input value={quizDescription} onChange={(event) => setQuizDescription(event.target.value)} placeholder="مراجعة الوحدة الأولى" /></label>
-                <label className="management-field">السؤال<input value={questionText} onChange={(event) => setQuestionText(event.target.value)} placeholder="ما وظيفة المتغير؟" required /></label>
-                <div className="quiz-builder-options">{questionOptions.map((option, index) => <label key={index} className="management-field">الاختيار {index + 1}<input value={option} onChange={(event) => setQuestionOptions((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} required /></label>)}</div>
-                <label className="management-field">سعر الاختبار بالجنيه المصري<input type="number" min="0" value={quizPrice} onChange={(event) => setQuizPrice(event.target.value)} /></label>
-                <label className="management-field">الإجابة الصحيحة<select value={correctOption} onChange={(event) => setCorrectOption(event.target.value)}><option value="0">الاختيار الأول</option><option value="1">الاختيار الثاني</option><option value="2">الاختيار الثالث</option><option value="3">الاختيار الرابع</option></select></label>
-                <button type="submit" className="primary-btn">إضافة الاختبار</button>
               </form>
               {studentActionMessage && <div className="message">{studentActionMessage}</div>}
               <div className="quiz-admin-list">
@@ -1492,8 +1588,9 @@ function App() {
                       <>
                         <div>
                           <h3>{quiz.title}</h3>
+                          <span className="content-location-badge">{formatContentLocation(quiz)}</span>
                           <p>{quiz.description}</p>
-                          <span>{quiz.questions.length} أسئلة</span>
+                          <span>{quiz.questions.length} أسئلة • باكدج الوحدة: {quiz.packagePrice || quiz.price} جنيه</span>
                         </div>
                         <div className="quiz-card-actions">
                           <button type="button" className="secondary-btn small-btn" onClick={() => startEditQuiz(quiz)}>تعديل الاسم والوصف</button>
@@ -1609,6 +1706,16 @@ function App() {
             {adminSection === 'videos' && <section className="video-panel">
               <div className="video-form-header">
                 <h3>إضافة فيديو جديد</h3>
+                <p>اختر الصف والوحدة، وسيظهر الفيديو مع اختبارات نفس الوحدة في باكدج واحدة.</p>
+              </div>
+
+              <div className="admin-package-overview">
+                {[...secondSecondaryUnits.map((unit) => ({ ...unit, grade: 'second-secondary', label: `تانية ثانوي - ${unit.label}` })), ...firstSecondaryUnits.map((unit) => ({ ...unit, grade: 'first-secondary', label: `أولى ثانوي - ${unit.label}` }))].map((unit) => {
+                  const count = videos.filter((video) => video.grade === unit.grade && (unit.grade === 'second-secondary' ? video.unitId === unit.id : video.term === unit.id)).length;
+                  const packageKey = `${unit.grade}:${unit.grade === 'second-secondary' ? 'all' : unit.id}:${unit.grade === 'second-secondary' ? unit.id : 1}`;
+                  const existingPrice = videos.find((video) => `${video.grade || 'second-secondary'}:${video.term || 'all'}:${video.unitId || 1}` === packageKey)?.packagePrice ?? '';
+                  return <div key={`${unit.grade}-${unit.id}`} className="admin-package-tile"><strong>{unit.label}</strong><span>{count} فيديو مضاف</span><div className="admin-package-price"><input type="number" min="0" placeholder="سعر الوحدة" value={packagePriceDrafts[packageKey] ?? existingPrice} onChange={(event) => setPackagePriceDrafts((current) => ({ ...current, [packageKey]: event.target.value }))} /><button type="button" className="small-btn" onClick={() => savePackagePrice(packageKey)}>حفظ السعر</button></div></div>;
+                })}
               </div>
 
               <form onSubmit={handleAddVideo} className="video-form">
@@ -1621,6 +1728,26 @@ function App() {
                     placeholder="مثال: شرح الوحدة الأولى"
                   />
                 </label>
+
+                <label>
+                  الصف الدراسي
+                  <select value={videoGrade} onChange={(event) => { setVideoGrade(event.target.value); setVideoTerm(''); setVideoUnitId('1'); }}>
+                    {gradeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </label>
+
+                {videoGrade === 'first-secondary' ? <label>
+                  الترم
+                  <select value={videoTerm} onChange={(event) => setVideoTerm(event.target.value)} required>
+                    <option value="">اختر الترم</option>
+                    {termOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </label> : <label>
+                  الوحدة
+                  <select value={videoUnitId} onChange={(event) => setVideoUnitId(event.target.value)}>
+                    {secondSecondaryUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.label}</option>)}
+                  </select>
+                </label>}
 
                 <label>
                   رابط الفيديو أو كود التضمين
@@ -1648,18 +1775,6 @@ function App() {
                     type="file"
                     accept="image/*"
                     onChange={(event) => handleLocalCoverUpload(event, setVideoCover)}
-                  />
-                </label>
-
-                <label>
-                  سعر الفيديو (جنيه مصري)
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={videoPrice}
-                    onChange={(event) => setVideoPrice(event.target.value)}
-                    placeholder="10"
                   />
                 </label>
 
@@ -1717,16 +1832,6 @@ function App() {
                             type="text"
                             value={editingVideoTitle}
                             onChange={(event) => setEditingVideoTitle(event.target.value)}
-                          />
-                        </label>
-                        <label>
-                          سعر الفيديو
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={editingVideoPrice}
-                            onChange={(event) => setEditingVideoPrice(event.target.value)}
                           />
                         </label>
                         <label>
