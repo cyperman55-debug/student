@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 
 const API_URL = '/api';
+const SESSION_TOKEN_KEY = 'shefo-token';
+const LAST_ACTIVITY_KEY = 'shefo-last-activity';
+const INACTIVITY_LIMIT = 5 * 60 * 1000;
 
 async function readApiResponse(response) {
   const contentType = response.headers.get('content-type') || '';
@@ -84,10 +87,10 @@ function App() {
   const [fullName, setFullName] = useState('');
   const [studentNumber, setStudentNumber] = useState('');
   const [guardianPhone, setGuardianPhone] = useState('');
-  const [token, setToken] = useState(localStorage.getItem('shefo-token') || '');
+  const [token, setToken] = useState(localStorage.getItem(SESSION_TOKEN_KEY) || '');
   const [user, setUser] = useState(null);
   const [dashboard, setDashboard] = useState(null);
-  const [authLoading, setAuthLoading] = useState(Boolean(localStorage.getItem('shefo-token')));
+  const [authLoading, setAuthLoading] = useState(Boolean(localStorage.getItem(SESSION_TOKEN_KEY)));
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [videoTitle, setVideoTitle] = useState('');
@@ -238,6 +241,40 @@ function App() {
     }
     setAuthLoading(true);
 
+    const existingActivity = Number(localStorage.getItem(LAST_ACTIVITY_KEY) || 0);
+    if (existingActivity && Date.now() - existingActivity >= INACTIVITY_LIMIT) {
+      localStorage.removeItem(SESSION_TOKEN_KEY);
+      localStorage.removeItem(LAST_ACTIVITY_KEY);
+      setToken('');
+      setUser(null);
+      setDashboard(null);
+      setAuthLoading(false);
+      return;
+    }
+
+    let lastActivityWrite = 0;
+    const markActivity = () => {
+      const now = Date.now();
+      if (now - lastActivityWrite < 1000) return;
+      lastActivityWrite = now;
+      localStorage.setItem(LAST_ACTIVITY_KEY, String(now));
+    };
+    const checkInactivity = () => {
+      const lastActivity = Number(localStorage.getItem(LAST_ACTIVITY_KEY) || Date.now());
+      if (Date.now() - lastActivity >= INACTIVITY_LIMIT) {
+        localStorage.removeItem(SESSION_TOKEN_KEY);
+        localStorage.removeItem(LAST_ACTIVITY_KEY);
+        setToken('');
+        setUser(null);
+        setDashboard(null);
+      }
+    };
+    const activityEvents = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'];
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, markActivity, { passive: true }));
+    window.addEventListener('storage', checkInactivity);
+    const inactivityTimer = window.setInterval(checkInactivity, 1000);
+    markActivity();
+
     const loadData = async () => {
       try {
         setLoading(true);
@@ -259,7 +296,8 @@ function App() {
         }
       } catch (err) {
         setToken('');
-        localStorage.removeItem('shefo-token');
+        localStorage.removeItem(SESSION_TOKEN_KEY);
+        localStorage.removeItem(LAST_ACTIVITY_KEY);
         setError(err.message || 'انتهت الجلسة');
       } finally {
         setLoading(false);
@@ -268,6 +306,12 @@ function App() {
     };
 
     loadData();
+
+    return () => {
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, markActivity));
+      window.removeEventListener('storage', checkInactivity);
+      window.clearInterval(inactivityTimer);
+    };
   }, [token]);
 
   const updateStudentBalance = async (event) => {
@@ -615,7 +659,8 @@ function App() {
         throw new Error(data.message || (registerMode ? 'فشل إنشاء الحساب' : 'فشل تسجيل الدخول'));
       }
 
-      localStorage.setItem('shefo-token', data.token);
+      localStorage.setItem(SESSION_TOKEN_KEY, data.token);
+      localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
       setUser(data.user);
       setToken(data.token);
     } catch (err) {
@@ -626,7 +671,8 @@ function App() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('shefo-token');
+    localStorage.removeItem(SESSION_TOKEN_KEY);
+    localStorage.removeItem(LAST_ACTIVITY_KEY);
     setToken('');
     setUser(null);
     setDashboard(null);
