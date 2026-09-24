@@ -451,9 +451,8 @@ app.post('/api/recharge-requests', authenticate, async (req, res) => {
   res.status(201).json({ request, message: 'تم إرسال طلب الشحن، وسيتم تحديث الرصيد بعد المراجعة' });
 });
 
-app.get('/api/admin/recharge-requests', authenticate, requireAdmin, (req, res) => {
-  res.json({ requests: rechargeRequests.map((request) => {
-    const student = users.find((user) => user.id === request.studentId);
+function formatRechargeRequest(request, students) {
+    const student = students.find((user) => String(user.id) === String(request.studentId));
     return {
       ...request,
       student: student?.name || 'طالب غير معروف',
@@ -462,14 +461,27 @@ app.get('/api/admin/recharge-requests', authenticate, requireAdmin, (req, res) =
       guardianPhone: student?.guardianPhone || '',
       studentBalance: student?.balance || 0,
     };
-  }) });
+}
+
+app.get('/api/admin/recharge-requests', authenticate, requireAdmin, async (req, res) => {
+  const requests = mongoReady
+    ? await RechargeRequest.find().sort({ createdAt: -1 }).lean()
+    : rechargeRequests;
+  const students = mongoReady
+    ? await User.find({ role: 'student' }).lean()
+    : users.filter((user) => user.role === 'student');
+  res.json({ requests: requests.map((request) => formatRechargeRequest(request, students)) });
 });
 
 app.post('/api/admin/recharge-requests/:id/approve', authenticate, requireAdmin, async (req, res) => {
-  const request = rechargeRequests.find((item) => String(item.id) === String(req.params.id));
+  const request = mongoReady
+    ? await RechargeRequest.findOne({ id: String(req.params.id) })
+    : rechargeRequests.find((item) => String(item.id) === String(req.params.id));
   if (!request) return res.status(404).json({ message: 'طلب الدفع غير موجود' });
   if (request.status !== 'Pending') return res.status(409).json({ message: 'تمت مراجعة الطلب من قبل' });
-  const student = users.find((user) => user.id === request.studentId);
+  const student = mongoReady
+    ? await User.findOne({ id: Number(request.studentId), role: 'student' })
+    : users.find((user) => String(user.id) === String(request.studentId));
   if (!student) return res.status(404).json({ message: 'الطالب غير موجود' });
   const creditedAmount = Number(req.body.amount ?? request.amount);
   if (!Number.isFinite(creditedAmount) || creditedAmount <= 0) return res.status(400).json({ message: 'مبلغ الإضافة غير صحيح' });
@@ -479,17 +491,23 @@ app.post('/api/admin/recharge-requests/:id/approve', authenticate, requireAdmin,
   request.reviewedAt = new Date().toISOString();
   await User.updateOne({ id: student.id }, { $set: { balance: student.balance } });
   await RechargeRequest.updateOne({ id: request.id }, { $set: { status: request.status, creditedAmount: request.creditedAmount, reviewedAt: request.reviewedAt } });
+  const memoryRequest = rechargeRequests.find((item) => String(item.id) === String(request.id));
+  if (memoryRequest) Object.assign(memoryRequest, { status: request.status, creditedAmount: request.creditedAmount, reviewedAt: request.reviewedAt });
   res.json({ request, balance: student.balance, message: 'تم اعتماد الطلب وإضافة الرصيد' });
 });
 
 app.post('/api/admin/recharge-requests/:id/reject', authenticate, requireAdmin, async (req, res) => {
-  const request = rechargeRequests.find((item) => String(item.id) === String(req.params.id));
+  const request = mongoReady
+    ? await RechargeRequest.findOne({ id: String(req.params.id) })
+    : rechargeRequests.find((item) => String(item.id) === String(req.params.id));
   if (!request) return res.status(404).json({ message: 'طلب الدفع غير موجود' });
   if (request.status !== 'Pending') return res.status(409).json({ message: 'تمت مراجعة الطلب من قبل' });
   request.status = 'Rejected';
   request.rejectionReason = String(req.body.reason || 'لم يتم اعتماد التحويل');
   request.reviewedAt = new Date().toISOString();
   await RechargeRequest.updateOne({ id: request.id }, { $set: { status: request.status, rejectionReason: request.rejectionReason, reviewedAt: request.reviewedAt } });
+  const memoryRequest = rechargeRequests.find((item) => String(item.id) === String(request.id));
+  if (memoryRequest) Object.assign(memoryRequest, { status: request.status, rejectionReason: request.rejectionReason, reviewedAt: request.reviewedAt });
   res.json({ request, message: 'تم رفض طلب الدفع' });
 });
 
