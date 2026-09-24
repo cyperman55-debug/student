@@ -493,32 +493,52 @@ app.post('/api/admin/recharge-requests/:id/reject', authenticate, requireAdmin, 
   res.json({ request, message: 'تم رفض طلب الدفع' });
 });
 
-app.get('/api/chat/messages', authenticate, (req, res) => {
-  res.json({ messages: [...chatMessages].sort((first, second) => Number(second.pinned) - Number(first.pinned) || new Date(first.createdAt) - new Date(second.createdAt)) });
+app.get('/api/chat/messages', authenticate, async (req, res) => {
+  if (mongoReady) {
+    const messages = await ChatMessage.find().sort({ createdAt: 1 }).lean();
+    return res.json({ messages: messages.map((message) => ({ ...message, id: Number(message.id), userId: Number(message.userId) })) });
+  }
+  res.json({ messages: [...chatMessages].sort((first, second) => new Date(first.createdAt) - new Date(second.createdAt)) });
 });
 
 app.post('/api/chat/messages', authenticate, async (req, res) => {
   const text = String(req.body.text || '').trim();
   if (!text || text.length > 500) return res.status(400).json({ message: 'اكتب رسالة من 1 إلى 500 حرف' });
-  const message = { id: chatMessages.length ? Math.max(...chatMessages.map((item) => item.id)) + 1 : 1, userId: req.user.id, userName: req.user.name, role: req.user.role, text, pinned: false, createdAt: new Date().toISOString() };
+  const latestMessage = mongoReady ? await ChatMessage.findOne().sort({ id: -1 }).lean() : null;
+  const nextId = latestMessage ? Number(latestMessage.id) + 1 : chatMessages.length ? Math.max(...chatMessages.map((item) => item.id)) + 1 : 1;
+  const message = { id: nextId, userId: req.user.id, userName: req.user.name, role: req.user.role, text, pinned: false, createdAt: new Date().toISOString() };
   chatMessages.push(message);
-  if (mongoReady) await ChatMessage.create(message);
+  if (mongoReady) {
+    const savedMessage = await ChatMessage.create(message);
+    return res.status(201).json({ message: { ...savedMessage.toObject(), id: Number(savedMessage.id), userId: Number(savedMessage.userId) } });
+  }
   res.status(201).json({ message });
 });
 
 app.patch('/api/chat/messages/:id/pin', authenticate, requireAdmin, async (req, res) => {
-  const message = chatMessages.find((item) => item.id === Number(req.params.id));
+  const message = mongoReady
+    ? await ChatMessage.findOne({ id: Number(req.params.id) })
+    : chatMessages.find((item) => item.id === Number(req.params.id));
   if (!message) return res.status(404).json({ message: 'الرسالة غير موجودة' });
   message.pinned = !message.pinned;
-  if (mongoReady) await ChatMessage.updateOne({ id: message.id }, { $set: { pinned: message.pinned } });
+  if (mongoReady) {
+    await message.save();
+    return res.json({ message: { ...message.toObject(), id: Number(message.id), userId: Number(message.userId) } });
+  }
   res.json({ message });
 });
 
 app.delete('/api/chat/messages/:id', authenticate, requireAdmin, async (req, res) => {
+  if (mongoReady) {
+    const result = await ChatMessage.deleteOne({ id: Number(req.params.id) });
+    if (!result.deletedCount) return res.status(404).json({ message: 'الرسالة غير موجودة' });
+    const memoryIndex = chatMessages.findIndex((item) => item.id === Number(req.params.id));
+    if (memoryIndex >= 0) chatMessages.splice(memoryIndex, 1);
+    return res.json({ success: true });
+  }
   const messageIndex = chatMessages.findIndex((item) => item.id === Number(req.params.id));
   if (messageIndex === -1) return res.status(404).json({ message: 'الرسالة غير موجودة' });
-  const [message] = chatMessages.splice(messageIndex, 1);
-  if (mongoReady) await ChatMessage.deleteOne({ id: message.id });
+  chatMessages.splice(messageIndex, 1);
   res.json({ success: true });
 });
 
