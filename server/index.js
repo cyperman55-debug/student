@@ -59,6 +59,13 @@ const videoSchema = new mongoose.Schema({
   packagePrice: { type: Number, default: 0, min: 0 },
 }, { versionKey: false });
 const Video = mongoose.models.Video || mongoose.model('Video', videoSchema);
+const lessonPdfSchema = new mongoose.Schema({
+  videoId: { type: Number, required: true, unique: true },
+  originalName: { type: String, required: true },
+  data: { type: Buffer, required: true },
+  updatedAt: { type: Date, default: Date.now },
+}, { versionKey: false });
+const LessonPdf = mongoose.models.LessonPdf || mongoose.model('LessonPdf', lessonPdfSchema);
 const videoPurchaseSchema = new mongoose.Schema({
   videoId: { type: Number, required: true },
   studentId: { type: Number, required: true },
@@ -98,6 +105,8 @@ const videoCatalog = [
   { id: 1, title: 'محاضرة تمهيدية', cover: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80', url: 'https://www.youtube.com/embed/dQw4w9WgXcQ', price: 10, grade: 'second-secondary', term: '', unitId: 1, packagePrice: 50 },
   { id: 2, title: 'شرح الوحدة الأولى', cover: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1200&q=80', url: 'https://www.youtube.com/embed/ysz5S6PUM-U', price: 10, grade: 'second-secondary', term: '', unitId: 1, packagePrice: 50 },
 ];
+const localLessonPdfs = new Map();
+videoCatalog.forEach((video) => { video.lessonPdfAvailable = false; });
 
 function packageKey(grade, term, unitId) {
   return `${String(grade || 'second-secondary')}:${String(term || 'all')}:${Number(unitId) || 1}`;
@@ -137,6 +146,8 @@ const initializeMongo = () => mongoConfigured
         } else {
           await Video.insertMany(videoCatalog);
         }
+        const savedLessonPdfIds = new Set((await LessonPdf.distinct('videoId')).map(Number));
+        videoCatalog.forEach((video) => { video.lessonPdfAvailable = savedLessonPdfIds.has(Number(video.id)); });
         const savedQuizzes = await Quiz.find().lean();
         const legacyQuizzes = savedQuizzes.filter((quiz) => !quiz.price || quiz.price < 1);
         if (legacyQuizzes.length) await Quiz.updateMany({ _id: { $in: legacyQuizzes.map((quiz) => quiz._id) } }, { $set: { price: 10 } });
@@ -222,7 +233,7 @@ const chatMessages = [
   {
     id: 1,
     userId: 1,
-    userName: 'أستاذ محمد عبد الشافي',
+    userName: 'مهندس محمد عبد الشافي',
     role: 'admin',
     text: 'أهلًا بكم في شات المنصة. اكتبوا أسئلتكم عن البرمجة والذكاء الاصطناعي.',
     pinned: true,
@@ -241,6 +252,18 @@ const paymentSettings = {
   minimumAmount: 10,
 };
 const activityLog = [];
+
+function studentCanAccessVideo(student, video) {
+  const key = packageKey(video.grade, video.term, video.unitId);
+  return Boolean(
+    student.contentUnlocked
+    || student.contentAccess?.all
+    || student.contentAccess?.packages?.includes(key)
+    || student.contentAccess?.videoIds?.includes(video.id)
+    || videoPurchases.some((purchase) => purchase.videoId === video.id && purchase.studentId === student.id)
+  );
+}
+
 function optionIndex(label) {
   return { a: 0, b: 1, c: 2, d: 3, أ: 0, ب: 1, ج: 2, د: 3 }[String(label).toLowerCase()] ?? -1;
 }
@@ -609,7 +632,7 @@ app.delete('/api/chat/messages/:id', authenticate, requireAdmin, async (req, res
   res.json({ success: true });
 });
 
-app.get('/api/dashboard', authenticate, (req, res) => {
+app.get('/api/dashboard', authenticate, async (req, res) => {
   const currentUser = users.find((item) => item.id === req.user.id);
 
   if (!currentUser) {
@@ -618,16 +641,31 @@ app.get('/api/dashboard', authenticate, (req, res) => {
 
   if (currentUser.role === 'admin') {
     const students = users.filter((item) => item.role === 'student');
+    let totalStudents = students.length;
+    let activeStudents = students.filter((student) => student.balance > 0 || student.contentUnlocked).length;
+
+    if (mongoReady) {
+      try {
+        [totalStudents, activeStudents] = await Promise.all([
+          User.countDocuments({ role: 'student' }),
+          User.countDocuments({ role: 'student', $or: [{ balance: { $gt: 0 } }, { contentUnlocked: true }] }),
+        ]);
+      } catch (error) {
+        console.error(`Student count query failed: ${error.message}`);
+        return res.status(503).json({ message: 'تعذر تحميل إحصائيات الطلاب' });
+      }
+    }
+
     return res.json({
       role: 'admin',
       stats: {
-        totalStudents: students.length,
+        totalStudents,
         activeLessons: 2,
         totalWalletBalance: students.reduce((total, student) => total + student.balance, 0),
         totalTransferredAmount: rechargeRequests
           .filter((request) => request.status === 'Approved')
           .reduce((total, request) => total + Number(request.creditedAmount ?? request.amount ?? 0), 0),
-        activeStudents: students.filter((student) => student.balance > 0 || student.contentUnlocked).length,
+        activeStudents,
       },
       summary: 'هذه الإحصائيات محسوبة مباشرة من حسابات الطلاب وحالة المحتوى الحالية.',
       user: {
@@ -650,12 +688,8 @@ app.get('/api/dashboard', authenticate, (req, res) => {
   const studentVideos = videoCatalog.filter((video) => video.grade === (currentUser.grade || 'second-secondary') && (currentUser.grade === 'first-secondary' || !video.term || video.term === (currentUser.term || '')));
   const videos = studentVideos.map((video) => {
     const key = packageKey(video.grade, video.term, video.unitId);
-    const open = currentUser.contentUnlocked
-      || currentUser.contentAccess?.all
-      || currentUser.contentAccess?.packages?.includes(key)
-      || currentUser.contentAccess?.videoIds?.includes(video.id)
-      || videoPurchases.some((purchase) => purchase.videoId === video.id && purchase.studentId === currentUser.id);
-    return { ...video, packageKey: key, packagePurchased: currentUser.contentAccess?.packages?.includes(key), purchased: open, locked: !open };
+    const open = studentCanAccessVideo(currentUser, video);
+    return { ...video, url: open ? video.url : '', packageKey: key, packagePurchased: currentUser.contentAccess?.packages?.includes(key), purchased: open, locked: !open };
   });
   const studentQuizzes = quizzes.filter((quiz) => quiz.published && quiz.grade === (currentUser.grade || 'second-secondary') && (currentUser.grade === 'first-secondary' || !quiz.term || quiz.term === (currentUser.term || '')));
 
@@ -664,7 +698,7 @@ app.get('/api/dashboard', authenticate, (req, res) => {
     balance: currentUser.balance,
     hasPaid: currentUser.balance > 0 || currentUser.contentUnlocked,
     contentUnlocked: currentUser.contentUnlocked,
-    quizzes: studentQuizzes.map(({ questions, ...quiz }) => ({ ...quiz, packageKey: packageKey(quiz.grade, quiz.term, quiz.unitId), purchased: quiz.packagePrice === 0 || currentUser.contentAccess?.packages?.includes(packageKey(quiz.grade, quiz.term, quiz.unitId)) || quiz.price === 0 || quizPurchases.some((purchase) => purchase.quizId === quiz.id && purchase.studentId === currentUser.id), questionCount: questions.length })),
+    quizzes: studentQuizzes.map(({ questions, ...quiz }) => ({ ...quiz, packageKey: packageKey(quiz.grade, quiz.term, quiz.unitId), purchased: currentUser.contentUnlocked || currentUser.contentAccess?.all || currentUser.contentAccess?.packages?.includes(packageKey(quiz.grade, quiz.term, quiz.unitId)) || quiz.packagePrice === 0 || quiz.price === 0 || quizPurchases.some((purchase) => purchase.quizId === quiz.id && purchase.studentId === currentUser.id), questionCount: questions.length })),
     attempts: quizAttempts.filter((attempt) => attempt.studentId === currentUser.id),
     user: {
       id: currentUser.id,
@@ -742,10 +776,86 @@ app.post('/api/admin/videos', authenticate, requireAdmin, async (req, res) => {
     term,
     unitId,
     packagePrice,
+    lessonPdfAvailable: false,
   };
   videoCatalog.unshift(video);
   if (mongoReady) await Video.create(video);
   res.status(201).json({ video, videos: videoCatalog });
+});
+
+app.post('/api/admin/videos/:id/lesson-pdf', authenticate, requireAdmin, pdfUpload.single('pdf'), async (req, res) => {
+  const videoId = Number(req.params.id);
+  const video = videoCatalog.find((item) => item.id === videoId);
+  if (!video) return res.status(404).json({ message: 'الدرس غير موجود' });
+  if (!req.file || !req.file.buffer.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
+    return res.status(400).json({ message: 'ارفع ملف PDF صالحًا للدرس' });
+  }
+
+  const originalName = String(req.file.originalname || `lesson-${videoId}.pdf`).replace(/[\r\n]/g, '').slice(0, 180);
+  const document = { videoId, originalName, data: req.file.buffer, updatedAt: new Date() };
+
+  try {
+    if (mongoReady) {
+      await LessonPdf.updateOne({ videoId }, { $set: document }, { upsert: true });
+    } else {
+      localLessonPdfs.set(videoId, document);
+    }
+  } catch (error) {
+    console.error(`Lesson PDF save failed: ${error.message}`);
+    return res.status(500).json({ message: 'تعذر حفظ ملف الدرس' });
+  }
+
+  video.lessonPdfAvailable = true;
+  res.json({ success: true, originalName, videoId });
+});
+
+app.delete('/api/admin/videos/:id/lesson-pdf', authenticate, requireAdmin, async (req, res) => {
+  const videoId = Number(req.params.id);
+  const video = videoCatalog.find((item) => item.id === videoId);
+  if (!video) return res.status(404).json({ message: 'الدرس غير موجود' });
+
+  try {
+    const deleted = mongoReady
+      ? (await LessonPdf.deleteOne({ videoId })).deletedCount > 0
+      : localLessonPdfs.delete(videoId);
+    if (!deleted) return res.status(404).json({ message: 'ملف الشرح غير موجود' });
+  } catch (error) {
+    console.error(`Lesson PDF delete failed: ${error.message}`);
+    return res.status(500).json({ message: 'تعذر حذف ملف الشرح' });
+  }
+
+  video.lessonPdfAvailable = false;
+  res.json({ success: true, videoId });
+});
+
+app.get('/api/videos/:id/lesson-pdf', authenticate, async (req, res) => {
+  const videoId = Number(req.params.id);
+  const video = videoCatalog.find((item) => item.id === videoId);
+  const currentUser = users.find((item) => item.id === req.user.id);
+  if (!video || !currentUser) return res.status(404).json({ message: 'ملف الدرس غير موجود' });
+  if (currentUser.role !== 'admin' && !studentCanAccessVideo(currentUser, video)) {
+    return res.status(403).json({ message: 'يجب شراء محتوى الوحدة لعرض ملف الدرس' });
+  }
+
+  let document;
+  try {
+    document = mongoReady
+      ? await LessonPdf.findOne({ videoId }).lean()
+      : localLessonPdfs.get(videoId);
+  } catch (error) {
+    console.error(`Lesson PDF load failed: ${error.message}`);
+    return res.status(503).json({ message: 'تعذر تحميل ملف الدرس' });
+  }
+  if (!document?.data) return res.status(404).json({ message: 'لم يتم رفع ملف PDF لهذا الدرس بعد' });
+
+  const safeName = String(document.originalName || `lesson-${videoId}.pdf`).replace(/[\r\n]/g, '').slice(0, 180);
+  res.set({
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': `inline; filename="lesson-${videoId}.pdf"; filename*=UTF-8''${encodeURIComponent(safeName)}`,
+    'Cache-Control': 'private, no-store, max-age=0',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  res.send(Buffer.from(document.data));
 });
 
 app.patch('/api/admin/videos/:id', authenticate, requireAdmin, async (req, res) => {
@@ -781,8 +891,9 @@ app.delete('/api/admin/videos/:id', authenticate, requireAdmin, async (req, res)
 
   videoCatalog.splice(index, 1);
   if (mongoReady) {
-    await Video.deleteOne({ id: videoId });
+    await Promise.all([Video.deleteOne({ id: videoId }), LessonPdf.deleteOne({ videoId })]);
   }
+  localLessonPdfs.delete(videoId);
 
   res.json({ success: true, videos: videoCatalog });
 });
@@ -807,6 +918,10 @@ app.post('/api/videos/:id/purchase', authenticate, async (req, res) => {
 app.post('/api/videos/:id/view', authenticate, (req, res) => {
   const video = videoCatalog.find((item) => item.id === Number(req.params.id));
   if (!video) return res.status(404).json({ message: 'الفيديو غير موجود' });
+  const currentUser = users.find((item) => item.id === req.user.id);
+  if (!currentUser || (currentUser.role !== 'admin' && !studentCanAccessVideo(currentUser, video))) {
+    return res.status(403).json({ message: 'يجب شراء محتوى الوحدة لمشاهدة الفيديو' });
+  }
   activityLog.push({ studentId: req.user.id, type: 'video', label: `مشاهدة فيديو: ${video.title}`, detail: 'تم تسجيل المشاهدة', createdAt: new Date().toISOString() });
   res.json({ success: true });
 });
