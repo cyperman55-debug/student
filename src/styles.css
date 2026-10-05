@@ -2183,6 +2183,12 @@ p {
   background: #ff0033;
 }
 
+.whatsapp-link:hover {
+  color: #ffffff;
+  border-color: #25d366;
+  background: #25d366;
+}
+
 .contact-link:focus-visible {
   outline: 3px solid rgba(37, 99, 235, 0.35);
   outline-offset: 3px;
@@ -2215,6 +2221,10 @@ p {
 
 .youtube-link .contact-icon {
   background: #ff0033;
+}
+
+.whatsapp-link .contact-icon {
+  background: #25d366;
 }
 
 .public-login-box {
