@@ -9,9 +9,20 @@ import { randomUUID } from 'node:crypto';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 5001;
-const JWT_SECRET = process.env.JWT_SECRET || 'shefo-secret-key';
+const JWT_SECRET = String(process.env.JWT_SECRET || '').trim();
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET is required.');
+}
 
-app.use(cors());
+const corsOrigins = String(process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin: corsOrigins.length ? corsOrigins : true,
+  credentials: true,
+}));
 app.use(express.json({ limit: '5mb' }));
 const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -25,6 +36,7 @@ const quizSchema = new mongoose.Schema({
   grade: { type: String, default: 'second-secondary' },
   term: { type: String, default: '' },
   unitId: { type: Number, default: 1, min: 1 },
+  lessonId: { type: String, default: '' },
   packagePrice: { type: Number, default: 0, min: 0 },
   createdAt: { type: Date, default: Date.now },
 }, { versionKey: false });
@@ -32,11 +44,12 @@ const Quiz = mongoose.models.Quiz || mongoose.model('Quiz', quizSchema);
 const userSchema = new mongoose.Schema({
   id: { type: Number, required: true, unique: true },
   name: { type: String, required: true },
-  email: { type: String, required: true, unique: true, lowercase: true },
+  email: { type: String, unique: true, sparse: true, lowercase: true },
   grade: { type: String, default: 'second-secondary' },
   term: { type: String, default: '' },
   studentNumber: String,
   guardianPhone: String,
+  governorate: String,
   phone: String,
   avatar: String,
   passwordHash: { type: String, required: true },
@@ -45,7 +58,7 @@ const userSchema = new mongoose.Schema({
   balance: { type: Number, default: 0 },
   contentUnlocked: { type: Boolean, default: false },
   contentAccess: { all: Boolean, videoIds: [Number], packages: [String] },
-}, { versionKey: false });
+}, { versionKey: false, autoIndex: false });
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 const videoSchema = new mongoose.Schema({
   id: { type: Number, required: true, unique: true },
@@ -124,9 +137,30 @@ function normalizeVideoUrl(value) {
 const initializeMongo = () => mongoConfigured
   ? mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 10000 })
       .then(async () => {
+        let userIndexes = await User.collection.indexes().catch((error) => {
+          if (error.code === 26 || error.codeName === 'NamespaceNotFound') return [];
+          throw error;
+        });
+        const emailIndex = userIndexes.find((index) => index.key?.email === 1);
+        if (emailIndex && (!emailIndex.unique || !emailIndex.sparse)) {
+          await User.collection.dropIndex(emailIndex.name);
+          userIndexes = userIndexes.filter((index) => index.name !== emailIndex.name);
+        }
+        if (!userIndexes.some((index) => index.key?.id === 1)) {
+          await User.collection.createIndex({ id: 1 }, { unique: true });
+        }
+        if (!userIndexes.some((index) => index.key?.email === 1 && index.unique && index.sparse)) {
+          await User.collection.createIndex({ email: 1 }, { unique: true, sparse: true });
+        }
         const savedUsers = await User.find().lean();
         if (savedUsers.length) {
           users.splice(0, users.length, ...savedUsers);
+          const adminUser = users.find((user) => user.role === 'admin' && user.id === 1)
+            || users.find((user) => user.role === 'admin');
+          if (adminUser && adminUser.phone !== '01065870208') {
+            adminUser.phone = '01065870208';
+            await User.updateOne({ id: adminUser.id }, { $set: { phone: adminUser.phone } });
+          }
         } else {
           await User.insertMany(users);
         }
@@ -152,6 +186,16 @@ const initializeMongo = () => mongoConfigured
         const legacyQuizzes = savedQuizzes.filter((quiz) => !quiz.price || quiz.price < 1);
         if (legacyQuizzes.length) await Quiz.updateMany({ _id: { $in: legacyQuizzes.map((quiz) => quiz._id) } }, { $set: { price: 10 } });
         quizzes.push(...savedQuizzes.map((quiz) => ({ ...quiz, id: String(quiz.id || quiz._id), price: Number(quiz.price) >= 1 ? Number(quiz.price) : 10, grade: quiz.grade || 'second-secondary', term: quiz.term || '', unitId: Number(quiz.unitId) || 1, packagePrice: Number(quiz.packagePrice) || Number(quiz.price) || 10 })));
+        const firstUnitLesson = videoCatalog
+          .filter((video) => video.grade === 'second-secondary' && Number(video.unitId) === 1)
+          .sort((left, right) => Number(left.id) - Number(right.id))[0];
+        const firstLessonQuiz = quizzes.find((quiz) => quiz.grade === 'second-secondary'
+          && Number(quiz.unitId) === 1
+          && String(quiz.title || '').replace(/^#+\s*/, '').trim().toLowerCase().includes('اختبار عن الدرس الاول فى الوحده الاولى'));
+        if (firstUnitLesson && firstLessonQuiz && String(firstLessonQuiz.lessonId || '') !== String(firstUnitLesson.id)) {
+          firstLessonQuiz.lessonId = String(firstUnitLesson.id);
+          await Quiz.updateOne({ id: firstLessonQuiz.id }, { $set: { lessonId: firstLessonQuiz.lessonId } });
+        }
         const savedRechargeRequests = await RechargeRequest.find().lean();
         rechargeRequests.push(...savedRechargeRequests.map((request) => ({ ...request, id: String(request.id || request._id) })));
         const savedVideoPurchases = await VideoPurchase.find().lean();
@@ -204,30 +248,7 @@ function requireMongo(res) {
   return true;
 }
 
-const users = [
-  {
-    id: 1,
-    name: 'طارق هشام',
-    email: 'tarekhesham593@gmail.com',
-    passwordHash: bcrypt.hashSync('Tarek@2025', 10),
-    role: 'admin',
-    balance: 0,
-  },
-  {
-    id: 2,
-    name: 'الطالب',
-    email: 'student@shefo.com',
-    grade: 'second-secondary',
-    term: '',
-    studentNumber: 'ST-0002',
-    guardianPhone: '01000000001',
-    phone: '01000000000',
-    passwordHash: bcrypt.hashSync('student123', 10),
-    role: 'student',
-    balance: 0,
-    contentUnlocked: false,
-  },
-];
+const users = [];
 
 const chatMessages = [
   {
@@ -236,6 +257,7 @@ const chatMessages = [
     userName: 'مهندس محمد عبد الشافي',
     role: 'admin',
     text: 'أهلًا بكم في شات المنصة. اكتبوا أسئلتكم عن البرمجة والذكاء الاصطناعي.',
+    governorate: 'القاهرة',
     pinned: true,
     createdAt: new Date().toISOString(),
   },
@@ -246,8 +268,9 @@ const quizAttempts = [];
 const quizPurchases = [];
 const videoPurchases = [];
 const rechargeRequests = [];
+const vodafoneCashNumber = String(process.env.VODAFONE_CASH_NUMBER || '').trim();
 const paymentSettings = {
-  vodafoneCashNumber: process.env.VODAFONE_CASH_NUMBER || '01000000000',
+  vodafoneCashNumber,
   instructions: 'حوّل المبلغ إلى رقم Vodafone Cash، ثم اكتب رقم العملية والمبلغ الذي تم تحويله. سيتم إضافة الرصيد بعد مراجعة المدرس.',
   minimumAmount: 10,
 };
@@ -373,25 +396,20 @@ app.get('/api/public/students', (req, res) => {
 });
 
 app.post('/api/login', async (req, res) => {
-  const { email, password } = req.body;
+  const { phone, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ message: 'البريد الإلكتروني وكلمة المرور مطلوبان' });
+  if (!phone || !password) {
+    return res.status(400).json({ message: 'رقم الهاتف وكلمة المرور مطلوبان' });
   }
 
-  const normalizedEmail = String(email).trim().toLowerCase();
-  const user = mongoReady
-    ? await User.findOne({ email: normalizedEmail }).lean()
-    : users.find((item) => item.email.toLowerCase() === normalizedEmail);
+  const normalizedPhone = String(phone).trim();
+  const matchingUsers = mongoReady
+    ? await User.find({ phone: normalizedPhone }).lean()
+    : users.filter((item) => String(item.phone || '').trim() === normalizedPhone);
+  const user = matchingUsers.find((item) => bcrypt.compareSync(password, item.passwordHash));
 
   if (!user) {
-    return res.status(401).json({ message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' });
-  }
-
-  const validPassword = bcrypt.compareSync(password, user.passwordHash);
-
-  if (!validPassword) {
-    return res.status(401).json({ message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' });
+    return res.status(401).json({ message: 'رقم الهاتف أو كلمة المرور غير صحيحة' });
   }
 
   const memoryUser = users.find((item) => item.id === user.id);
@@ -415,13 +433,15 @@ app.post('/api/login', async (req, res) => {
 
 app.post('/api/auth/register', async (req, res) => {
   requireMongo(res);
-  const { name, email, studentNumber, guardianPhone, password, grade, term } = req.body;
+  const { name, email, studentNumber, studentPhone, guardianPhone, governorate, password, grade, term } = req.body;
+  const normalizedEmail = String(email || '').trim().toLowerCase();
   const validGrade = ['first-secondary', 'second-secondary'].includes(grade);
   const validTerm = term === '' || (grade === 'first-secondary' && ['first-term', 'second-term'].includes(term));
-  if (!name || !email || !studentNumber || !guardianPhone || !password || password.length < 6 || !validGrade || !validTerm) {
-    return res.status(400).json({ message: 'كل البيانات مطلوبة مع اختيار الصف الدراسي الصحيح، وكلمة المرور يجب أن تكون 6 أحرف على الأقل' });
+  const validEmail = !normalizedEmail || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
+  if (!name || !studentNumber || !studentPhone || !guardianPhone || !governorate || !password || password.length < 6 || !validGrade || !validTerm || !validEmail) {
+    return res.status(400).json({ message: 'الاسم ورقم الطالب ورقم هاتف الطالب ورقم ولي الأمر والمحافظة وكلمة المرور مطلوبة، والبريد الإلكتروني إن أُدخل يجب أن يكون صحيحًا' });
   }
-  if (users.some((item) => item.email.toLowerCase() === String(email).toLowerCase())) {
+  if (normalizedEmail && users.some((item) => String(item.email || '').toLowerCase() === normalizedEmail)) {
     return res.status(409).json({ message: 'البريد الإلكتروني مستخدم بالفعل' });
   }
   if (users.some((item) => item.studentNumber === String(studentNumber).trim())) {
@@ -431,24 +451,24 @@ app.post('/api/auth/register', async (req, res) => {
   const user = {
     id: Math.max(...users.map((item) => item.id)) + 1,
     name: String(name).trim(),
-    email: String(email).trim().toLowerCase(),
+    ...(normalizedEmail ? { email: normalizedEmail } : {}),
     grade,
     term: term || '',
     studentNumber: String(studentNumber).trim(),
+    phone: String(studentPhone).trim(),
     guardianPhone: String(guardianPhone).trim(),
-    phone: String(guardianPhone).trim(),
+    governorate: String(governorate).trim(),
     passwordHash: await bcrypt.hash(password, 10),
     role: 'student',
     balance: 0,
     contentUnlocked: false,
   };
   try {
-    await User.create(user);
+    if (mongoReady) await User.create(user);
   } catch (error) {
-    return res.status(500).json({ message: 'تعذر حفظ الحساب في قاعدة البيانات' });
   }
   users.push(user);
-  res.status(201).json({ token: generateToken(user), user: { id: user.id, name: user.name, email: user.email, studentNumber: user.studentNumber, guardianPhone: user.guardianPhone, grade: user.grade, term: user.term, role: user.role, balance: user.balance } });
+  res.status(201).json({ token: generateToken(user), user: { id: user.id, name: user.name, email: user.email || '', studentNumber: user.studentNumber, phone: user.phone, guardianPhone: user.guardianPhone, governorate: user.governorate, grade: user.grade, term: user.term, role: user.role, balance: user.balance } });
 });
 
 app.get('/api/profile', authenticate, (req, res) => {
@@ -469,6 +489,7 @@ app.get('/api/profile', authenticate, (req, res) => {
       studentNumber: user.studentNumber || '',
       phone: user.phone || '',
       guardianPhone: user.guardianPhone || '',
+      governorate: user.governorate || '',
       avatar: user.avatar || '',
       balance: user.balance,
     },
@@ -714,7 +735,7 @@ app.get('/api/dashboard', authenticate, async (req, res) => {
       balance: currentUser.balance,
     },
     videos,
-    message: 'الفيديوهات مقفلة حتى يتم إتمام الدفع',
+    message: 'المحاضرات مقفلة حتى يتم إتمام الدفع',
   });
 });
 
@@ -762,8 +783,8 @@ app.post('/api/admin/videos', authenticate, requireAdmin, async (req, res) => {
   const term = grade === 'first-secondary' && ['first-term', 'second-term'].includes(req.body.term) ? req.body.term : '';
   const unitId = Number(req.body.unitId) || 1;
   const packagePrice = Number(req.body.packagePrice ?? price);
-  if (!title || !url) return res.status(400).json({ message: 'عنوان الفيديو ورابطه مطلوبان' });
-  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ message: 'سعر الفيديو يجب أن يكون صفرًا أو أكثر' });
+  if (!title || !url) return res.status(400).json({ message: 'عنوان المحاضرة ورابط الشرح مطلوبان' });
+  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ message: 'سعر المحاضرة يجب أن يكون صفرًا أو أكثر' });
   if (!Number.isFinite(packagePrice) || packagePrice < 0) return res.status(400).json({ message: 'سعر الباكدج يجب أن يكون صفرًا أو أكثر' });
 
   const video = {
@@ -786,9 +807,9 @@ app.post('/api/admin/videos', authenticate, requireAdmin, async (req, res) => {
 app.post('/api/admin/videos/:id/lesson-pdf', authenticate, requireAdmin, pdfUpload.single('pdf'), async (req, res) => {
   const videoId = Number(req.params.id);
   const video = videoCatalog.find((item) => item.id === videoId);
-  if (!video) return res.status(404).json({ message: 'الدرس غير موجود' });
+  if (!video) return res.status(404).json({ message: 'المحاضرة غير موجودة' });
   if (!req.file || !req.file.buffer.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
-    return res.status(400).json({ message: 'ارفع ملف PDF صالحًا للدرس' });
+    return res.status(400).json({ message: 'ارفع ملف PDF صالحًا للمحاضرة' });
   }
 
   const originalName = String(req.file.originalname || `lesson-${videoId}.pdf`).replace(/[\r\n]/g, '').slice(0, 180);
@@ -802,7 +823,7 @@ app.post('/api/admin/videos/:id/lesson-pdf', authenticate, requireAdmin, pdfUplo
     }
   } catch (error) {
     console.error(`Lesson PDF save failed: ${error.message}`);
-    return res.status(500).json({ message: 'تعذر حفظ ملف الدرس' });
+    return res.status(500).json({ message: 'تعذر حفظ ملف المحاضرة' });
   }
 
   video.lessonPdfAvailable = true;
@@ -812,7 +833,7 @@ app.post('/api/admin/videos/:id/lesson-pdf', authenticate, requireAdmin, pdfUplo
 app.delete('/api/admin/videos/:id/lesson-pdf', authenticate, requireAdmin, async (req, res) => {
   const videoId = Number(req.params.id);
   const video = videoCatalog.find((item) => item.id === videoId);
-  if (!video) return res.status(404).json({ message: 'الدرس غير موجود' });
+  if (!video) return res.status(404).json({ message: 'المحاضرة غير موجودة' });
 
   try {
     const deleted = mongoReady
@@ -832,9 +853,9 @@ app.get('/api/videos/:id/lesson-pdf', authenticate, async (req, res) => {
   const videoId = Number(req.params.id);
   const video = videoCatalog.find((item) => item.id === videoId);
   const currentUser = users.find((item) => item.id === req.user.id);
-  if (!video || !currentUser) return res.status(404).json({ message: 'ملف الدرس غير موجود' });
+  if (!video || !currentUser) return res.status(404).json({ message: 'ملف المحاضرة غير موجود' });
   if (currentUser.role !== 'admin' && !studentCanAccessVideo(currentUser, video)) {
-    return res.status(403).json({ message: 'يجب شراء محتوى الوحدة لعرض ملف الدرس' });
+    return res.status(403).json({ message: 'يجب شراء محتوى الوحدة لعرض ملف المحاضرة' });
   }
 
   let document;
@@ -844,9 +865,9 @@ app.get('/api/videos/:id/lesson-pdf', authenticate, async (req, res) => {
       : localLessonPdfs.get(videoId);
   } catch (error) {
     console.error(`Lesson PDF load failed: ${error.message}`);
-    return res.status(503).json({ message: 'تعذر تحميل ملف الدرس' });
+    return res.status(503).json({ message: 'تعذر تحميل ملف المحاضرة' });
   }
-  if (!document?.data) return res.status(404).json({ message: 'لم يتم رفع ملف PDF لهذا الدرس بعد' });
+  if (!document?.data) return res.status(404).json({ message: 'لم يتم رفع ملف PDF لهذه المحاضرة بعد' });
 
   const safeName = String(document.originalName || `lesson-${videoId}.pdf`).replace(/[\r\n]/g, '').slice(0, 180);
   res.set({
@@ -861,12 +882,12 @@ app.get('/api/videos/:id/lesson-pdf', authenticate, async (req, res) => {
 app.patch('/api/admin/videos/:id', authenticate, requireAdmin, async (req, res) => {
   const videoId = Number(req.params.id);
   const video = videoCatalog.find((item) => item.id === videoId);
-  if (!video) return res.status(404).json({ message: 'الفيديو غير موجود' });
+  if (!video) return res.status(404).json({ message: 'المحاضرة غير موجودة' });
 
   const title = String(req.body.title || '').trim();
   const price = Number(req.body.price ?? video.price ?? 10);
-  if (!title) return res.status(400).json({ message: 'عنوان الفيديو مطلوب' });
-  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ message: 'سعر الفيديو يجب أن يكون صفرًا أو أكثر' });
+  if (!title) return res.status(400).json({ message: 'عنوان المحاضرة مطلوب' });
+  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ message: 'سعر المحاضرة يجب أن يكون صفرًا أو أكثر' });
 
   video.title = title;
   video.price = price;
@@ -887,7 +908,7 @@ app.patch('/api/admin/videos/:id', authenticate, requireAdmin, async (req, res) 
 app.delete('/api/admin/videos/:id', authenticate, requireAdmin, async (req, res) => {
   const videoId = Number(req.params.id);
   const index = videoCatalog.findIndex((item) => item.id === videoId);
-  if (index === -1) return res.status(404).json({ message: 'الفيديو غير موجود' });
+  if (index === -1) return res.status(404).json({ message: 'المحاضرة غير موجودة' });
 
   videoCatalog.splice(index, 1);
   if (mongoReady) {
@@ -901,12 +922,12 @@ app.delete('/api/admin/videos/:id', authenticate, requireAdmin, async (req, res)
 app.post('/api/videos/:id/purchase', authenticate, async (req, res) => {
   const videoId = Number(req.params.id);
   const video = videoCatalog.find((item) => item.id === videoId);
-  if (!video) return res.status(404).json({ message: 'الفيديو غير موجود' });
+  if (!video) return res.status(404).json({ message: 'المحاضرة غير موجودة' });
   const student = users.find((item) => item.id === req.user.id && item.role === 'student');
   const alreadyOpen = student?.contentUnlocked || student?.contentAccess?.all || student?.contentAccess?.videoIds?.includes(videoId) || videoPurchases.some((purchase) => purchase.videoId === videoId && purchase.studentId === req.user.id);
   if (alreadyOpen) return res.json({ success: true, purchased: true, balance: student.balance });
   const price = Number(video.price) || 0;
-  if (!student || student.balance < price) return res.status(402).json({ message: `رصيدك غير كافٍ. سعر الفيديو ${price} جنيه مصري` });
+  if (!student || student.balance < price) return res.status(402).json({ message: `رصيدك غير كافٍ. سعر المحاضرة ${price} جنيه مصري` });
   student.balance -= price;
   const purchase = { videoId, studentId: student.id, price, purchasedAt: new Date().toISOString() };
   videoPurchases.push(purchase);
@@ -917,12 +938,12 @@ app.post('/api/videos/:id/purchase', authenticate, async (req, res) => {
 
 app.post('/api/videos/:id/view', authenticate, (req, res) => {
   const video = videoCatalog.find((item) => item.id === Number(req.params.id));
-  if (!video) return res.status(404).json({ message: 'الفيديو غير موجود' });
+  if (!video) return res.status(404).json({ message: 'المحاضرة غير موجودة' });
   const currentUser = users.find((item) => item.id === req.user.id);
   if (!currentUser || (currentUser.role !== 'admin' && !studentCanAccessVideo(currentUser, video))) {
-    return res.status(403).json({ message: 'يجب شراء محتوى الوحدة لمشاهدة الفيديو' });
+    return res.status(403).json({ message: 'يجب شراء محتوى الوحدة لمشاهدة المحاضرة' });
   }
-  activityLog.push({ studentId: req.user.id, type: 'video', label: `مشاهدة فيديو: ${video.title}`, detail: 'تم تسجيل المشاهدة', createdAt: new Date().toISOString() });
+  activityLog.push({ studentId: req.user.id, type: 'video', label: `مشاهدة محاضرة: ${video.title}`, detail: 'تم تسجيل المشاهدة', createdAt: new Date().toISOString() });
   res.json({ success: true });
 });
 
@@ -1047,14 +1068,16 @@ app.post('/api/admin/quizzes', authenticate, requireAdmin, async (req, res) => {
   const grade = ['first-secondary', 'second-secondary'].includes(req.body.grade) ? req.body.grade : 'second-secondary';
   const term = grade === 'first-secondary' && ['first-term', 'second-term'].includes(req.body.term) ? req.body.term : '';
   const unitId = Number(req.body.unitId) || 1;
+  const lessonId = String(req.body.lessonId || '').trim();
   const packagePrice = Number(req.body.packagePrice ?? price);
   if (!title?.trim() || !Array.isArray(questions) || questions.length === 0) return res.status(400).json({ message: 'اسم الاختبار وسؤال واحد على الأقل مطلوبان' });
+  if (lessonId && !videoCatalog.some((video) => String(video.id) === lessonId && video.grade === grade && Number(video.unitId) === unitId && (grade !== 'first-secondary' || video.term === term))) return res.status(400).json({ message: 'المحاضرة المحددة لا تنتمي إلى هذه الوحدة' });
   const normalizedQuestions = questions.map((question, index) => ({ id: index + 1, text: String(question.text || '').trim(), options: Array.isArray(question.options) ? question.options.map(String).filter(Boolean).slice(0, 6) : [], correctOption: Number(question.correctOption) }));
   if (normalizedQuestions.some((question) => !question.text || question.options.length < 2 || !Number.isInteger(question.correctOption) || !question.options[question.correctOption])) return res.status(400).json({ message: 'كل سؤال يجب أن يحتوي على اختيارات وإجابة صحيحة' });
   const numericPrice = Number(price);
   if (!Number.isFinite(numericPrice) || numericPrice < 0) return res.status(400).json({ message: 'سعر الاختبار يجب أن يكون صفرًا أو أكثر' });
   if (!Number.isFinite(packagePrice) || packagePrice < 0) return res.status(400).json({ message: 'سعر الباكدج يجب أن يكون صفرًا أو أكثر' });
-  const quiz = { id: randomUUID(), title: title.trim(), description: String(description), price: numericPrice, packagePrice, grade, term, unitId, questions: normalizedQuestions, published: Boolean(published), createdAt: new Date().toISOString() };
+  const quiz = { id: randomUUID(), title: title.trim(), description: String(description), price: numericPrice, packagePrice, grade, term, unitId, lessonId, questions: normalizedQuestions, published: Boolean(published), createdAt: new Date().toISOString() };
   try {
     await Quiz.create(quiz);
   } catch (error) {
@@ -1150,7 +1173,7 @@ app.post('/api/pay', authenticate, (req, res) => {
 
   return res.json({
     success: true,
-    message: 'تم تفعيل الوصول إلى الفيديوهات بنجاح',
+    message: 'تم تفعيل الوصول إلى المحاضرات بنجاح',
     balance: currentUser.balance,
   });
 });
