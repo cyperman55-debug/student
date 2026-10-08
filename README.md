@@ -22,16 +22,17 @@ The frontend runs on `http://localhost:5173` and proxies `/api` to the backend o
 
 ## Split deployment: Cloudflare frontend and Vercel API
 
-The Cloudflare Worker deployment serves the static frontend; it does not run the Express API. The API is deployed at `https://student-puce-one.vercel.app`, and the published Cloudflare site automatically uses it. Other deployments can override the API base URL with the `VITE_API_URL` build variable.
+The Cloudflare Worker deployment serves the static frontend; it does not run the Express API. The API is deployed at `https://student-puce-one.vercel.app`. The `workers.dev` site and custom domains automatically use it; localhost and Vercel-hosted frontend deployments use their same-origin API. Other deployments can override the API base URL with the `VITE_API_URL` build variable.
 
-1. Import this repository into Vercel and deploy it with the included `vercel.json`.
-2. Add these Vercel Environment Variables for Production:
+1. Add the purchased domain to the Cloudflare account that manages the Worker, and configure the domain's nameservers at its registrar to the nameservers Cloudflare provides.
+2. In Cloudflare Workers & Pages, attach the domain (and optionally `www`) to the frontend Worker as custom domains. Do not point the domain to the Vercel API; keep the frontend on Cloudflare.
+3. In the Vercel project hosting the API, add these Environment Variables for Production:
    - `MONGODB_URI`
    - `JWT_SECRET`
    - `VODAFONE_CASH_NUMBER`
-   - `CORS_ORIGIN` set to the exact Cloudflare site origin, for example `https://student.cyperman55.workers.dev` (no trailing slash).
-3. After deployment, verify `https://<your-vercel-domain>/api/health` returns `{"ok":true,...}`.
-4. If the Vercel domain or Cloudflare domain changes, update the frontend API URL in `src/App.jsx` or set `VITE_API_URL` to `https://<your-vercel-domain>/api` (no trailing slash) in Cloudflare's build settings, then redeploy the Worker. `VITE_API_URL` is embedded into the frontend at build time; adding it only as a runtime Worker variable is not sufficient.
+   - `CORS_ORIGIN` set to comma-separated exact frontend origins, for example `https://student.cyperman55.workers.dev,https://eng-mohamedabdeelshafy.com,https://www.eng-mohamedabdeelshafy.com` (no trailing slash).
+4. Verify `https://student-puce-one.vercel.app/api/health` returns `{"ok":true,...}`.
+5. Redeploy the Cloudflare Worker with this repository's latest build. If the Vercel API or frontend domains change, update `src/App.jsx` or set `VITE_API_URL` to `https://<your-vercel-domain>/api` (no trailing slash) in the Cloudflare build settings. `VITE_API_URL` is embedded into the frontend at build time; adding it only as a runtime Worker variable is not sufficient.
 
 Never put `MONGODB_URI` or `JWT_SECRET` in Cloudflare frontend variables or any `VITE_*` variable. Only the public API base URL belongs in `VITE_API_URL`.
 

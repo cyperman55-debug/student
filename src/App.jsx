@@ -3,9 +3,10 @@ import heroImage from '../WhatsApp Image 2026-09-30 at 4.14.49 AM.jpeg';
 import RobotAssistant from './RobotAssistant';
 
 const cloudflareApiUrl = 'https://student-puce-one.vercel.app/api';
-const isPublishedCloudflareSite = typeof window !== 'undefined'
-  && window.location.hostname === 'student.cyperman55.workers.dev';
-const API_URL = import.meta.env.VITE_API_URL || (isPublishedCloudflareSite ? cloudflareApiUrl : '/api');
+const usesSameOriginApi = typeof window === 'undefined'
+  || ['localhost', '127.0.0.1'].includes(window.location.hostname)
+  || window.location.hostname.endsWith('.vercel.app');
+const API_URL = import.meta.env.VITE_API_URL || (usesSameOriginApi ? '/api' : cloudflareApiUrl);
 const SESSION_TOKEN_KEY = 'shefo-token';
 const LAST_ACTIVITY_KEY = 'shefo-last-activity';
 const INACTIVITY_LIMIT = 5 * 60 * 1000;
