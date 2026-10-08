@@ -10,9 +10,7 @@ import { randomUUID } from 'node:crypto';
 const app = express();
 const PORT = Number(process.env.PORT) || 5001;
 const JWT_SECRET = String(process.env.JWT_SECRET || '').trim();
-if (!JWT_SECRET) {
-  throw new Error('JWT_SECRET is required.');
-}
+const jwtConfigured = Boolean(JWT_SECRET);
 
 const corsOrigins = String(process.env.CORS_ORIGIN || '')
   .split(',')
@@ -112,8 +110,12 @@ const rechargeSchema = new mongoose.Schema({
 const RechargeRequest = mongoose.models.RechargeRequest || mongoose.model('RechargeRequest', rechargeSchema);
 let mongoReady = false;
 let mongoError = null;
-const mongoUri = String(process.env.MONGODB_URI || process.env.MONGO_URI || '').trim();
+const productionMode = process.env.NODE_ENV === 'production';
+const mongoUri = String(process.env.MONGODB_URI || (!productionMode && process.env.MONGO_URI) || '').trim();
 const mongoConfigured = Boolean(mongoUri);
+if (productionMode && !mongoConfigured) {
+  throw new Error('MONGODB_URI is required in production.');
+}
 const videoCatalog = [
   { id: 1, title: 'محاضرة تمهيدية', cover: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80', url: 'https://www.youtube.com/embed/dQw4w9WgXcQ', price: 10, grade: 'second-secondary', term: '', unitId: 1, packagePrice: 50 },
   { id: 2, title: 'شرح الوحدة الأولى', cover: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1200&q=80', url: 'https://www.youtube.com/embed/ysz5S6PUM-U', price: 10, grade: 'second-secondary', term: '', unitId: 1, packagePrice: 50 },
@@ -222,6 +224,9 @@ const initializeMongo = () => mongoConfigured
       .catch((error) => {
         mongoReady = false;
         mongoError = error;
+        if (productionMode) {
+          throw new Error('MongoDB connection failed. Production server cannot start without MongoDB.', { cause: error });
+        }
         console.warn(`MongoDB unavailable: ${error.message}. Continuing with in-memory mode.`);
         return false;
       })
@@ -346,6 +351,10 @@ function generateToken(user) {
 }
 
 function authenticate(req, res, next) {
+  if (!jwtConfigured) {
+    return res.status(503).json({ message: 'إعداد JWT_SECRET مطلوب لتشغيل تسجيل الدخول.' });
+  }
+
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -372,6 +381,17 @@ function requireAdmin(req, res, next) {
 
 app.get('/api/health', async (req, res) => {
   await waitForMongo();
+  const missingConfiguration = [];
+  if (!jwtConfigured) missingConfiguration.push('JWT_SECRET');
+  if (process.env.VERCEL && !mongoConfigured) missingConfiguration.push('MONGODB_URI');
+  if (missingConfiguration.length) {
+    return res.status(503).json({
+      ok: false,
+      database: mongoConfigured ? (mongoReady ? 'connected' : 'unavailable') : 'not-configured',
+      missingConfiguration,
+      message: 'إعدادات الخادم المطلوبة غير مكتملة.',
+    });
+  }
   if (mongoConfigured && !mongoReady) {
     return res.status(503).json({ ok: false, database: 'unavailable', reason: mongoError?.name || 'connection-failed', message: 'تعذر الاتصال بقاعدة البيانات' });
   }
@@ -379,7 +399,12 @@ app.get('/api/health', async (req, res) => {
 });
 
 app.use('/api', async (req, res, next) => {
-  if (!mongoConfigured) return next();
+  if (!mongoConfigured) {
+    if (process.env.VERCEL) {
+      return res.status(503).json({ message: 'إعداد MONGODB_URI مطلوب لحفظ بيانات المنصة في Vercel.' });
+    }
+    return next();
+  }
   await waitForMongo();
   if (!mongoReady) {
     return res.status(503).json({ message: 'قاعدة البيانات غير متاحة. راجع MONGODB_URI في إعدادات Vercel.', detail: process.env.VERCEL ? undefined : mongoError?.message });
@@ -396,6 +421,10 @@ app.get('/api/public/students', (req, res) => {
 });
 
 app.post('/api/login', async (req, res) => {
+  if (!jwtConfigured) {
+    return res.status(503).json({ message: 'إعداد JWT_SECRET مطلوب لتشغيل تسجيل الدخول.' });
+  }
+
   const { phone, password } = req.body;
 
   if (!phone || !password) {
@@ -432,6 +461,10 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.post('/api/auth/register', async (req, res) => {
+  if (!jwtConfigured) {
+    return res.status(503).json({ message: 'إعداد JWT_SECRET مطلوب لتشغيل تسجيل الدخول.' });
+  }
+
   requireMongo(res);
   const { name, email, studentNumber, studentPhone, guardianPhone, governorate, password, grade, term } = req.body;
   const normalizedEmail = String(email || '').trim().toLowerCase();
@@ -1157,26 +1190,28 @@ app.post('/api/quizzes/:id/submit', authenticate, (req, res) => {
   res.json({ attempt, corrections });
 });
 
-app.post('/api/pay', authenticate, (req, res) => {
-  const currentUser = users.find((item) => item.id === req.user.id);
+if (!productionMode) {
+  app.post('/api/pay', authenticate, (req, res) => {
+    const currentUser = users.find((item) => item.id === req.user.id);
 
-  if (!currentUser) {
-    return res.status(404).json({ message: 'المستخدم غير موجود' });
-  }
+    if (!currentUser) {
+      return res.status(404).json({ message: 'المستخدم غير موجود' });
+    }
 
-  if (currentUser.role !== 'student') {
-    return res.status(403).json({ message: 'هذه العملية خاصة بالطلاب فقط' });
-  }
+    if (currentUser.role !== 'student') {
+      return res.status(403).json({ message: 'هذه العملية خاصة بالطلاب فقط' });
+    }
 
-  currentUser.balance = 1;
-  User.updateOne({ id: currentUser.id }, { $set: { balance: currentUser.balance } }).catch((error) => console.error(`Payment persistence failed: ${error.message}`));
+    currentUser.balance = 1;
+    User.updateOne({ id: currentUser.id }, { $set: { balance: currentUser.balance } }).catch((error) => console.error(`Payment persistence failed: ${error.message}`));
 
-  return res.json({
-    success: true,
-    message: 'تم تفعيل الوصول إلى المحاضرات بنجاح',
-    balance: currentUser.balance,
+    return res.json({
+      success: true,
+      message: 'تم تفعيل الوصول إلى المحاضرات بنجاح',
+      balance: currentUser.balance,
+    });
   });
-});
+}
 
 app.use('/api', (req, res) => {
   res.status(404).json({ message: 'مسار API غير موجود' });
@@ -1187,6 +1222,10 @@ app.use((error, req, res, next) => {
   if (req.path.startsWith('/api')) return res.status(500).json({ message: 'حدث خطأ في الخادم' });
   next(error);
 });
+
+if (productionMode) {
+  await connectMongo;
+}
 
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {

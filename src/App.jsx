@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import wordmarkImage from '../4877+.png';
 import heroImage from '../WhatsApp Image 2026-09-30 at 4.14.49 AM.jpeg';
+import RobotAssistant from './RobotAssistant';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const SESSION_TOKEN_KEY = 'shefo-token';
@@ -52,6 +52,307 @@ async function readApiResponse(response) {
   return response.json();
 }
 
+function CyberGlobe() {
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+
+    let scene;
+    let renderer;
+    let earthTexture;
+    let animationFrame = 0;
+    let resizeObserver;
+    let disposed = false;
+
+    const initialize = async () => {
+      const THREE = await import('three');
+      if (disposed) return;
+
+      try {
+      scene = new THREE.Scene();
+      scene.add(new THREE.AmbientLight(0xbfd4d4, 1.25));
+      const sunlight = new THREE.DirectionalLight(0xfff1d4, 2.2);
+      sunlight.position.set(-3, 2, 4);
+      scene.add(sunlight);
+      const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 40);
+      camera.position.set(0, 0, 5.1);
+
+      renderer = new THREE.WebGLRenderer({
+        alpha: true,
+        antialias: true,
+        powerPreference: 'low-power',
+        preserveDrawingBuffer: true,
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+      renderer.setClearColor(0x000000, 0);
+      container.appendChild(renderer.domElement);
+
+      const globeGroup = new THREE.Group();
+      globeGroup.rotation.x = -0.08;
+      globeGroup.rotation.y = -0.3;
+      scene.add(globeGroup);
+
+      const globeRadius = 1.42;
+      const sphereGeometry = new THREE.SphereGeometry(globeRadius, 64, 48);
+      earthTexture = new THREE.TextureLoader().load(
+        '/earth-blue-marble.jpg',
+        () => renderer.render(scene, camera),
+        undefined,
+        (error) => console.warn('The Earth texture could not be loaded.', error),
+      );
+      earthTexture.colorSpace = THREE.SRGBColorSpace;
+      earthTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      const globeSurface = new THREE.Mesh(
+        sphereGeometry,
+        new THREE.MeshPhongMaterial({
+          map: earthTexture,
+          specular: new THREE.Color(0x172b3b),
+          shininess: 14,
+        }),
+      );
+      globeGroup.add(globeSurface);
+
+      const gridMaterial = new THREE.LineBasicMaterial({
+        color: 0x326d61,
+        transparent: true,
+        opacity: 0.1,
+        depthWrite: false,
+      });
+      const highlightMaterial = new THREE.LineBasicMaterial({
+        color: 0x438d7b,
+        transparent: true,
+        opacity: 0.18,
+        depthWrite: false,
+      });
+
+      const addGridLine = (points, material) => {
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        globeGroup.add(new THREE.Line(geometry, material));
+      };
+
+      for (let latitude = -75; latitude <= 75; latitude += 15) {
+        const latitudeRadians = THREE.MathUtils.degToRad(latitude);
+        const points = [];
+        for (let step = 0; step <= 96; step += 1) {
+          const longitudeRadians = (step / 96) * Math.PI * 2;
+          points.push(new THREE.Vector3(
+            globeRadius * 1.003 * Math.cos(latitudeRadians) * Math.sin(longitudeRadians),
+            globeRadius * 1.003 * Math.sin(latitudeRadians),
+            globeRadius * 1.003 * Math.cos(latitudeRadians) * Math.cos(longitudeRadians),
+          ));
+        }
+        addGridLine(points, latitude % 30 === 0 ? highlightMaterial : gridMaterial);
+      }
+
+      for (let longitude = 0; longitude < 180; longitude += 15) {
+        const longitudeRadians = THREE.MathUtils.degToRad(longitude);
+        const points = [];
+        for (let step = 0; step <= 96; step += 1) {
+          const latitudeRadians = THREE.MathUtils.degToRad(-90 + (step / 96) * 180);
+          points.push(new THREE.Vector3(
+            globeRadius * 1.003 * Math.cos(latitudeRadians) * Math.sin(longitudeRadians),
+            globeRadius * 1.003 * Math.sin(latitudeRadians),
+            globeRadius * 1.003 * Math.cos(latitudeRadians) * Math.cos(longitudeRadians),
+          ));
+        }
+        addGridLine(points, longitude % 45 === 0 ? highlightMaterial : gridMaterial);
+      }
+
+      const pointOnGlobe = (latitude, longitude, radius = globeRadius * 1.006) => {
+        const latitudeRadians = THREE.MathUtils.degToRad(latitude);
+        const longitudeRadians = THREE.MathUtils.degToRad(longitude);
+        return new THREE.Vector3(
+          radius * Math.cos(latitudeRadians) * Math.sin(longitudeRadians),
+          radius * Math.sin(latitudeRadians),
+          radius * Math.cos(latitudeRadians) * Math.cos(longitudeRadians),
+        );
+      };
+
+      const landmasses = [
+        [[72, -165], [66, -150], [60, -140], [58, -128], [50, -124], [45, -124], [38, -122], [32, -117], [24, -108], [18, -105], [20, -97], [25, -90], [28, -82], [30, -81], [25, -80], [24, -82], [29, -89], [30, -93], [33, -97], [36, -101], [41, -104], [45, -105], [49, -102], [53, -100], [57, -94], [62, -90], [65, -82], [69, -85], [72, -105], [72, -135]],
+        [[12, -81], [8, -77], [2, -78], [-5, -80], [-12, -77], [-18, -72], [-25, -70], [-35, -72], [-45, -75], [-55, -68], [-52, -60], [-40, -58], [-28, -54], [-18, -48], [-8, -40], [0, -50], [7, -58], [10, -66], [12, -75]],
+        [[37, -10], [35, 5], [32, 18], [31, 30], [22, 36], [12, 44], [2, 50], [-12, 42], [-25, 33], [-35, 20], [-32, 15], [-20, 12], [-5, 8], [5, -5], [15, -17], [27, -15]],
+        [[70, -10], [68, 18], [72, 40], [66, 58], [62, 80], [58, 100], [52, 120], [45, 135], [38, 140], [30, 130], [22, 122], [18, 110], [7, 105], [10, 90], [20, 75], [25, 60], [35, 50], [40, 38], [36, 28], [43, 18], [48, 8], [56, 2], [62, -5]],
+        [[-11, 113], [-16, 122], [-25, 133], [-34, 138], [-39, 151], [-30, 154], [-20, 148], [-16, 138], [-12, 128]],
+      ];
+      const pointInsideLandmass = (latitude, longitude, polygon) => {
+        let inside = false;
+        for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current, current += 1) {
+          const [currentLatitude, currentLongitude] = polygon[current];
+          const [previousLatitude, previousLongitude] = polygon[previous];
+          const crossesLatitude = (currentLatitude > latitude) !== (previousLatitude > latitude);
+          const edgeLongitude = ((previousLongitude - currentLongitude) * (latitude - currentLatitude))
+            / (previousLatitude - currentLatitude) + currentLongitude;
+          if (crossesLatitude && longitude < edgeLongitude) inside = !inside;
+        }
+        return inside;
+      };
+      const landColors = [0x64d7b3, 0xe958bd, 0x56c7ff, 0xf5a94b, 0x7db2ff].map((color) => new THREE.Color(color));
+      const landPositions = [];
+      const landColorValues = [];
+      for (let latitude = -55; latitude <= 75; latitude += 3.5) {
+        for (let longitude = -180; longitude <= 180; longitude += 3.5) {
+          const landmassIndex = landmasses.findIndex((polygon) => pointInsideLandmass(latitude, longitude, polygon));
+          if (landmassIndex === -1) continue;
+          const point = pointOnGlobe(latitude, longitude, globeRadius * 1.012);
+          const color = landColors[landmassIndex];
+          landPositions.push(point.x, point.y, point.z);
+          landColorValues.push(color.r, color.g, color.b);
+        }
+      }
+      const landGeometry = new THREE.BufferGeometry();
+      landGeometry.setAttribute('position', new THREE.Float32BufferAttribute(landPositions, 3));
+      landGeometry.setAttribute('color', new THREE.Float32BufferAttribute(landColorValues, 3));
+      globeGroup.add(new THREE.Points(
+        landGeometry,
+        new THREE.PointsMaterial({
+          size: 0.013,
+          sizeAttenuation: true,
+          vertexColors: true,
+          transparent: true,
+          opacity: 0.36,
+          depthWrite: false,
+        }),
+      ));
+      const continentMaterial = new THREE.LineBasicMaterial({
+        color: 0xa1ffe0,
+        transparent: true,
+        opacity: 0.36,
+        depthWrite: false,
+      });
+      landmasses.forEach((coordinates) => {
+        const outline = coordinates.map(([latitude, longitude]) => pointOnGlobe(latitude, longitude, globeRadius * 1.01));
+        outline.push(outline[0]);
+        addGridLine(outline, continentMaterial);
+      });
+
+      const routeDefinitions = [
+        { from: [40.7, -74], to: [51.5, -0.1], color: 0xf044aa },
+        { from: [51.5, -0.1], to: [30, 31.2], color: 0x57e7b4 },
+        { from: [30, 31.2], to: [1.3, 103.8], color: 0xffb342 },
+        { from: [35.7, 139.7], to: [37.8, -122.4], color: 0x3caeff },
+        { from: [-23.5, -46.6], to: [40.7, -74], color: 0xff4b73 },
+        { from: [55.7, 37.6], to: [48.8, 2.3], color: 0x9b71ff },
+        { from: [1.3, 103.8], to: [-33.9, 151.2], color: 0x57e7b4 },
+        { from: [19.1, 72.9], to: [25.2, 55.3], color: 0xffb342 },
+        { from: [34.1, -118.2], to: [35.7, 139.7], color: 0xf044aa },
+      ];
+      const animatedRoutes = routeDefinitions.map((route, index) => {
+        const start = pointOnGlobe(...route.from);
+        const end = pointOnGlobe(...route.to);
+        const control = start.clone().add(end).normalize().multiplyScalar(globeRadius * (1.32 + index * 0.025));
+        const curve = new THREE.QuadraticBezierCurve3(start, control, end);
+        const glow = new THREE.Mesh(
+          new THREE.TubeGeometry(curve, 64, 0.014, 6, false),
+          new THREE.MeshBasicMaterial({
+            color: route.color,
+            transparent: true,
+            opacity: 0.24,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+          }),
+        );
+        const routeLine = new THREE.Mesh(
+          new THREE.TubeGeometry(curve, 64, 0.0045, 6, false),
+          new THREE.MeshBasicMaterial({
+            color: route.color,
+            transparent: true,
+            opacity: 0.98,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+          }),
+        );
+        globeGroup.add(glow, routeLine);
+
+        const nodeMaterial = new THREE.MeshBasicMaterial({ color: route.color });
+        const nodeGeometry = new THREE.SphereGeometry(0.035, 12, 12);
+        const startNode = new THREE.Mesh(nodeGeometry, nodeMaterial);
+        const endNode = new THREE.Mesh(nodeGeometry, nodeMaterial);
+        startNode.position.copy(start);
+        endNode.position.copy(end);
+        globeGroup.add(startNode, endNode);
+
+        const pulse = new THREE.Mesh(
+          new THREE.SphereGeometry(0.038, 12, 12),
+          new THREE.MeshBasicMaterial({
+            color: route.color,
+            transparent: true,
+            opacity: 1,
+            blending: THREE.AdditiveBlending,
+          }),
+        );
+        globeGroup.add(pulse);
+
+        return { curve, pulse, offset: index / routeDefinitions.length };
+      });
+
+      const resize = () => {
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        if (!width || !height) return;
+        renderer.setSize(width, height, false);
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+      };
+
+      resizeObserver = new ResizeObserver(resize);
+      resizeObserver.observe(container);
+      resize();
+
+      const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (prefersReducedMotion) {
+        animatedRoutes.forEach(({ curve, pulse, offset }) => pulse.position.copy(curve.getPoint((0.35 + offset) % 1)));
+        renderer.render(scene, camera);
+      } else {
+        let previousFrameTime = performance.now();
+        let elapsed = 0;
+        const animate = () => {
+          animationFrame = window.requestAnimationFrame(animate);
+          const currentFrameTime = performance.now();
+          const delta = Math.min((currentFrameTime - previousFrameTime) / 1000, 0.05);
+          previousFrameTime = currentFrameTime;
+          elapsed += delta;
+          globeGroup.rotation.y += delta * 0.045;
+          animatedRoutes.forEach(({ curve, pulse, offset }) => {
+            pulse.position.copy(curve.getPoint((elapsed * 0.14 + offset) % 1));
+          });
+          renderer.render(scene, camera);
+        };
+        animate();
+      }
+        } catch (error) {
+          console.warn('The cyber globe could not be initialized.', error);
+          renderer?.domElement.remove();
+          renderer?.dispose();
+        }
+      };
+
+      initialize().catch((error) => console.warn('The cyber globe could not be loaded.', error));
+
+    return () => {
+        disposed = true;
+      window.cancelAnimationFrame(animationFrame);
+      resizeObserver?.disconnect();
+      earthTexture?.dispose();
+      scene?.traverse((object) => {
+        object.geometry?.dispose();
+        if (Array.isArray(object.material)) {
+          object.material.forEach((material) => material.dispose());
+        } else {
+          object.material?.dispose();
+        }
+      });
+      renderer?.dispose();
+      renderer?.forceContextLoss();
+      renderer?.domElement.remove();
+    };
+  }, []);
+
+  return <div ref={containerRef} className="cyber-globe" aria-hidden="true" />;
+}
+
 function CreditFooter() {
   return (
     <footer className="credit-footer">
@@ -77,22 +378,22 @@ const publicStages = [
 
 const featureItems = [
   {
-    icon: '</>',
+    command: 'python3 lesson.py --examples',
     title: 'شرح عملي مبسط',
     text: 'نفهمك البرمجة خطوة بخطوة مع أمثلة ومشاريع مناسبة لمرحلتك.',
   },
   {
-    icon: '💻',
+    command: 'mkdir ai-project && code .',
     title: 'تطبيقات ومشاريع',
     text: 'حوّل كل محاضرة إلى تطبيق عملي يثبت فهمك ويقوي مهاراتك.',
   },
   {
-    icon: '🧠',
+    command: 'python3 quiz.py --track-progress',
     title: 'اختبارات دورية',
     text: 'تقييم مستمر يساعدك على متابعة مستواك والاستعداد للامتحان.',
   },
   {
-    icon: '🤖',
+    command: 'python3 ai_lab.py --future-ready',
     title: 'ذكاء اصطناعي للمستقبل',
     text: 'تعرّف على مفاهيم الذكاء الاصطناعي بطريقة واضحة ومرتبطة بالواقع.',
   },
@@ -1277,9 +1578,6 @@ function App() {
         </header>
 
         <main className="landing-main">
-          <div className="identity-wordmark-frame">
-            <img className="identity-wordmark" src={wordmarkImage} alt="برمجها وروّق" />
-          </div>
           <section className="hero-section">
             <div className="hero-copy">
               <span className="eyebrow">منصة تعليمية متخصصة</span>
@@ -1300,6 +1598,10 @@ function App() {
               </div>
             </div>
           </section>
+
+          <div className="code-gap code-gap-left" aria-hidden="true">
+            <span className="code-float code-float-python"><span>PYTHON</span> print("Hello, world!")</span>
+          </div>
 
           <section id="levels" className="section-block" data-reveal>
             <div className="section-heading">
@@ -1381,6 +1683,10 @@ function App() {
             </div>
           </section>
 
+          <div className="code-gap code-gap-right" aria-hidden="true">
+            <span className="code-float code-float-js"><span>JAVASCRIPT</span> const future = "yours";</span>
+          </div>
+
           <section id="features" className="section-block" data-reveal>
             <div className="section-heading">
               <span className="eyebrow">مميزات المنصة</span>
@@ -1389,16 +1695,38 @@ function App() {
 
             <div className="feature-grid">
               {featureItems.map((item, index) => (
-                <div key={item.title} className="feature-card" data-reveal>
-                  <span className="feature-index">{index + 1}</span>
-                  <span className="feature-icon">{item.icon}</span>
-                  <h3>{item.title}</h3>
-                  <p>{item.text}</p>
-                  <span className="feature-line" aria-hidden="true" />
-                </div>
+                <article key={item.title} className="feature-card" data-reveal>
+                  <div className="terminal-window">
+                    <div className="terminal-titlebar" dir="ltr">
+                      <span className="terminal-lights" aria-hidden="true"><i /><i /><i /></span>
+                      <span className="terminal-window-title">student@shefo: ~/features</span>
+                      <span className="terminal-window-menu">bash</span>
+                    </div>
+                    <div className="terminal-body">
+                      <div className="terminal-command" dir="ltr">
+                        <span className="terminal-prompt">student@shefo:~$</span>
+                        <code>{item.command}</code>
+                      </div>
+                      <p className="terminal-comment" dir="rtl"><span aria-hidden="true">#</span>{item.text}</p>
+                      <div className="terminal-output" dir="rtl">
+                        <span className="terminal-output-label">النتيجة</span>
+                        <strong>{item.title}</strong>
+                      </div>
+                    </div>
+                    <div className="terminal-statusbar" dir="ltr">
+                      <span><i aria-hidden="true" /> system ready</span>
+                      <span>bash 5.2</span>
+                      <span className="terminal-index">{String(index + 1).padStart(2, '0')}</span>
+                    </div>
+                  </div>
+                </article>
               ))}
             </div>
           </section>
+
+          <div className="code-gap code-gap-left" aria-hidden="true">
+            <span className="code-float code-float-sql"><span>SQL</span> SELECT * FROM ideas;</span>
+          </div>
 
           <section className="section-block community-block" data-reveal>
             <div className="section-heading">
@@ -1416,6 +1744,10 @@ function App() {
             </div>
           </section>
 
+          <div className="code-gap code-gap-right" aria-hidden="true">
+            <span className="code-float code-float-html"><span>HTML</span> &lt;build&gt;your future&lt;/build&gt;</span>
+          </div>
+
           <section id="about" className="section-block about-block" data-reveal>
             <div className="section-heading">
               <span className="eyebrow">عن المنصة</span>
@@ -1430,6 +1762,10 @@ function App() {
               </p>
             </div>
           </section>
+
+          <div className="code-gap code-gap-left" aria-hidden="true">
+            <span className="code-float code-float-loop"><span>JS</span> while (learning) { 'grow()' }</span>
+          </div>
 
           <section id="contact" className="section-block contact-block" data-reveal>
             <div className="section-heading">
@@ -1796,6 +2132,8 @@ function App() {
 
     return (
       <div className="student-shell student-home-shell">
+        {/* Robot assistant (purely visual, non-interrupting) */}
+        <RobotAssistant />
         <header className="student-header student-dashboard-header">
           <div className="student-header-title">
             <p className="eyebrow">مساحة التعلم</p>
