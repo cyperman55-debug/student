@@ -394,8 +394,8 @@ const defaultVideos = [
     id: 1,
     title: 'محاضرة تمهيدية',
     url: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-    cover:
-      'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80',
+    cover: 'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+    coverIsCustom: false,
     locked: true,
     grade: 'second-secondary',
     term: '',
@@ -406,8 +406,8 @@ const defaultVideos = [
     id: 2,
     title: 'شرح الوحدة الأولى',
     url: 'https://www.youtube.com/embed/ysz5S6PUM-U',
-    cover:
-      'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1200&q=80',
+    cover: 'https://img.youtube.com/vi/ysz5S6PUM-U/hqdefault.jpg',
+    coverIsCustom: false,
     locked: true,
     grade: 'second-secondary',
     term: '',
@@ -463,6 +463,7 @@ function App() {
   const [editingVideoTitle, setEditingVideoTitle] = useState('');
   const [editingVideoUrl, setEditingVideoUrl] = useState('');
   const [editingVideoCover, setEditingVideoCover] = useState('');
+  const [editingVideoCoverIsCustom, setEditingVideoCoverIsCustom] = useState(false);
   const [videos, setVideos] = useState(defaultVideos);
   const [selectedVideo, setSelectedVideo] = useState(defaultVideos[0]);
   const [selectedAdminLectureId, setSelectedAdminLectureId] = useState(null);
@@ -1488,6 +1489,7 @@ function App() {
     setEditingVideoTitle(video.title);
     setEditingVideoUrl(video.url || '');
     setEditingVideoCover(video.cover || '');
+    setEditingVideoCoverIsCustom(Boolean(video.coverIsCustom));
     setVideoFormError('');
   };
 
@@ -1496,6 +1498,7 @@ function App() {
     setEditingVideoTitle('');
     setEditingVideoUrl('');
     setEditingVideoCover('');
+    setEditingVideoCoverIsCustom(false);
   };
 
   const saveEditedVideo = async () => {
@@ -1516,7 +1519,7 @@ function App() {
       const response = await fetch(`${API_URL}/admin/videos/${video.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ title: trimmedTitle, url: editingVideoUrl.trim(), cover: editingVideoCover || video.cover, price: 0 }),
+        body: JSON.stringify({ title: trimmedTitle, url: editingVideoUrl.trim(), cover: editingVideoCoverIsCustom ? editingVideoCover : '', price: 0 }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'تعذر تعديل المحاضرة');
@@ -1997,7 +2000,7 @@ function App() {
                 </>
               ) : (
                 <button type="button" className="lesson-video-cover" onClick={() => playLessonVideo(selectedLesson)} aria-label={`تشغيل شرح المحاضرة: ${selectedLesson.title}`}>
-                  <img src={selectedLesson.cover} alt="" />
+                  {selectedLesson.cover ? <img src={selectedLesson.cover} alt="" /> : <span className="lesson-video-cover-placeholder" aria-hidden="true">▶</span>}
                   <span className="lesson-video-cover-play" aria-hidden="true">▶</span>
                   <span className="lesson-video-cover-caption">اضغط لتشغيل الشرح</span>
                 </button>
@@ -2232,7 +2235,7 @@ function App() {
           </div>
           <div className="package-grid">
             {unitsWithContent.map((contentPackage) => {
-              const packageCover = contentPackage.videos[0]?.cover;
+              const packageCover = contentPackage.videos.find((video) => video.cover)?.cover;
               return <article key={contentPackage.packageKey} className="package-card">
                 <span className="package-price">{contentPackage.packagePrice > 0 ? <CurrencyAmount amount={contentPackage.packagePrice} /> : 'السعر قريبًا'}</span>
                 <button
@@ -2633,14 +2636,20 @@ function App() {
                           رابط غلاف المحاضرة
                           <input
                             type="url"
-                            value={editingVideoCover.startsWith('data:image') ? '' : editingVideoCover}
-                            onChange={(event) => setEditingVideoCover(event.target.value)}
-                            placeholder="https://example.com/cover.jpg"
+                            value={editingVideoCoverIsCustom && !editingVideoCover.startsWith('data:image') ? editingVideoCover : ''}
+                            onChange={(event) => {
+                              setEditingVideoCover(event.target.value);
+                              setEditingVideoCoverIsCustom(Boolean(event.target.value));
+                            }}
+                            placeholder="اتركه فارغًا لإعادة استخراج صورة الفيديو تلقائيًا"
                           />
                         </label>
                         <label className="management-field">
                           أو رفع صورة غلاف من الجهاز
-                          <input type="file" accept="image/*" onChange={(event) => handleLocalCoverUpload(event, setEditingVideoCover)} />
+                          <input type="file" accept="image/*" onChange={(event) => {
+                            setEditingVideoCoverIsCustom(true);
+                            handleLocalCoverUpload(event, setEditingVideoCover);
+                          }} />
                         </label>
 
                         <div className="quiz-card-actions">
@@ -2757,7 +2766,7 @@ function App() {
               <div className="panel admin-add-panel">
                 <div className="video-form-header">
                   <h3>إضافة محاضرة جديدة</h3>
-                  <p>اختر الصف والوحدة، ثم أضف محاضرتك مع رابط الفيديو، والغلاف يختياري، وسيتم استخراج غلاف YouTube تلقائيًا إذا تركته فارغًا.</p>
+                  <p>تُستخرج صورة YouTube أو Bunny تلقائيًا عند ترك الغلاف فارغًا. أضف صورة منفصلة لتكون غلافًا مخصصًا.</p>
                 </div>
 
                 <form onSubmit={handleAddVideo} className="video-form">
@@ -2797,7 +2806,7 @@ function App() {
 
                   <label>
                     رابط غلاف المحاضرة (اختياري)
-                    <input type="url" value={videoCover} onChange={(event) => setVideoCover(event.target.value)} placeholder="اتركه فارغًا وسيتم أخذ غلاف YouTube تلقائيًا" />
+                    <input type="url" value={videoCover} onChange={(event) => setVideoCover(event.target.value)} placeholder="اتركه فارغًا لاستخراج صورة YouTube أو Bunny تلقائيًا" />
                   </label>
 
                   <label>

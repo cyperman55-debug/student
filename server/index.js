@@ -63,6 +63,7 @@ const videoSchema = new mongoose.Schema({
   title: { type: String, required: true },
   url: { type: String, required: true },
   cover: { type: String, default: '' },
+  coverIsCustom: { type: Boolean, default: false },
   price: { type: Number, default: 10, min: 0 },
   grade: { type: String, default: 'second-secondary' },
   term: { type: String, default: '' },
@@ -117,9 +118,14 @@ if (productionMode && !mongoConfigured) {
   throw new Error('MONGODB_URI is required in production.');
 }
 const videoCatalog = [
-  { id: 1, title: 'محاضرة تمهيدية', cover: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80', url: 'https://www.youtube.com/embed/dQw4w9WgXcQ', price: 10, grade: 'second-secondary', term: '', unitId: 1, packagePrice: 50 },
-  { id: 2, title: 'شرح الوحدة الأولى', cover: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1200&q=80', url: 'https://www.youtube.com/embed/ysz5S6PUM-U', price: 10, grade: 'second-secondary', term: '', unitId: 1, packagePrice: 50 },
+  { id: 1, title: 'محاضرة تمهيدية', cover: 'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg', coverIsCustom: false, url: 'https://www.youtube.com/embed/dQw4w9WgXcQ', price: 10, grade: 'second-secondary', term: '', unitId: 1, packagePrice: 50 },
+  { id: 2, title: 'شرح الوحدة الأولى', cover: 'https://img.youtube.com/vi/ysz5S6PUM-U/hqdefault.jpg', coverIsCustom: false, url: 'https://www.youtube.com/embed/ysz5S6PUM-U', price: 10, grade: 'second-secondary', term: '', unitId: 1, packagePrice: 50 },
 ];
+const legacyGeneratedCovers = new Set([
+  'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80',
+  'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1200&q=80',
+  'https://images.unsplash.com/photo-1516321165247-4aa89a48be28?auto=format&fit=crop&w=1200&q=80',
+]);
 const localLessonPdfs = new Map();
 videoCatalog.forEach((video) => { video.lessonPdfAvailable = false; });
 
@@ -143,9 +149,12 @@ function getVideoCoverFromUrl(value) {
   const iframeMatch = input.match(/<iframe[^>]+src=["']([^"']+)["']/i);
   const rawUrl = (iframeMatch ? iframeMatch[1] : input).trim();
   const youtubeMatch = rawUrl.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/|embed\/)|youtu\.be\/|youtube-nocookie\.com\/embed\/)([\w-]{6,})/i);
-  if (!youtubeMatch) return '';
+  if (youtubeMatch) return `https://img.youtube.com/vi/${youtubeMatch[1]}/hqdefault.jpg`;
 
-  return `https://img.youtube.com/vi/${youtubeMatch[1]}/maxresdefault.jpg`;
+  const bunnyMatch = rawUrl.match(/iframe\.mediadelivery\.net\/(?:embed|play)\/(\d+)\/([\w-]+)/i);
+  if (bunnyMatch) return `https://vz-${bunnyMatch[1]}.b-cdn.net/${bunnyMatch[2]}/thumbnail.jpg`;
+
+  return '';
 }
 
 const initializeMongo = () => mongoConfigured
@@ -194,17 +203,32 @@ const initializeMongo = () => mongoConfigured
         }
         const savedVideos = await Video.find().lean();
         if (savedVideos.length) {
-          videoCatalog.splice(0, videoCatalog.length, ...savedVideos.map((video) => ({
-            ...video,
-            id: Number(video.id),
-            url: normalizeVideoUrl(video.url),
-            price: Number(video.price) || 10,
-            grade: video.grade || 'second-secondary',
-            term: video.term || '',
-            unitId: Number(video.unitId) || 1,
-            packagePrice: Number(video.packagePrice) || Number(video.price) || 10,
-          })));
-          await Promise.all(videoCatalog.map((video) => Video.updateOne({ id: video.id }, { $set: { url: video.url } })));
+          const normalizedVideos = savedVideos.map((savedVideo) => {
+            const url = normalizeVideoUrl(savedVideo.url);
+            const savedCover = String(savedVideo.cover || '');
+            const generatedCover = getVideoCoverFromUrl(url);
+            const isCustomCover = typeof savedVideo.coverIsCustom === 'boolean'
+              ? savedVideo.coverIsCustom
+              : Boolean(savedCover && savedCover !== generatedCover && !legacyGeneratedCovers.has(savedCover));
+            const cover = isCustomCover ? savedCover : generatedCover || (legacyGeneratedCovers.has(savedCover) ? '' : savedCover);
+            return {
+              ...savedVideo,
+              id: Number(savedVideo.id),
+              url,
+              cover,
+              coverIsCustom: isCustomCover,
+              price: Number(savedVideo.price) || 10,
+              grade: savedVideo.grade || 'second-secondary',
+              term: savedVideo.term || '',
+              unitId: Number(savedVideo.unitId) || 1,
+              packagePrice: Number(savedVideo.packagePrice) || Number(savedVideo.price) || 10,
+            };
+          });
+          videoCatalog.splice(0, videoCatalog.length, ...normalizedVideos);
+          await Promise.all(videoCatalog.map((video) => Video.updateOne(
+            { id: video.id },
+            { $set: { url: video.url, cover: video.cover, coverIsCustom: video.coverIsCustom } },
+          )));
         } else {
           await Video.insertMany(videoCatalog);
         }
@@ -240,8 +264,6 @@ const initializeMongo = () => mongoConfigured
             id: Number(message.id),
             userId: Number(message.userId),
           })));
-        } else {
-          await ChatMessage.insertMany(chatMessages);
         }
         mongoReady = true;
         console.log(`MongoDB connected; loaded ${savedQuizzes.length} quizzes`);
@@ -313,18 +335,7 @@ const createDefaultAdmin = () => {
 const defaultAdmin = createDefaultAdmin();
 const users = defaultAdmin ? [defaultAdmin] : [];
 
-const chatMessages = [
-  {
-    id: 1,
-    userId: 1,
-    userName: 'مهندس محمد عبد الشافي',
-    role: 'admin',
-    text: 'أهلًا بكم في شات المنصة. اكتبوا أسئلتكم عن البرمجة والذكاء الاصطناعي.',
-    governorate: 'القاهرة',
-    pinned: true,
-    createdAt: new Date().toISOString(),
-  },
-];
+const chatMessages = [];
 
 const quizzes = [];
 const quizAttempts = [];
@@ -772,7 +783,7 @@ app.get('/api/dashboard', authenticate, async (req, res) => {
       role: 'admin',
       stats: {
         totalStudents,
-        activeLessons: 2,
+        activeLessons: videoCatalog.length,
         totalWalletBalance: students.reduce((total, student) => total + student.balance, 0),
         totalTransferredAmount: rechargeRequests
           .filter((request) => request.status === 'Approved')
@@ -878,12 +889,13 @@ app.post('/api/admin/videos', authenticate, requireAdmin, async (req, res) => {
   if (!Number.isFinite(price) || price < 0) return res.status(400).json({ message: 'سعر المحاضرة يجب أن يكون صفرًا أو أكثر' });
   if (!Number.isFinite(packagePrice) || packagePrice < 0) return res.status(400).json({ message: 'سعر الباكدج يجب أن يكون صفرًا أو أكثر' });
 
-  const fallbackCover = getVideoCoverFromUrl(url) || 'https://images.unsplash.com/photo-1516321165247-4aa89a48be28?auto=format&fit=crop&w=1200&q=80';
+  const coverIsCustom = Boolean(cover);
   const video = {
     id: videoCatalog.length ? Math.max(...videoCatalog.map((item) => Number(item.id))) + 1 : 1,
     title,
     url,
-    cover: cover || fallbackCover,
+    cover: cover || getVideoCoverFromUrl(url),
+    coverIsCustom,
     price,
     grade,
     term,
@@ -983,7 +995,8 @@ app.patch('/api/admin/videos/:id', authenticate, requireAdmin, async (req, res) 
 
   const nextUrl = req.body.url ? normalizeVideoUrl(req.body.url) : video.url;
   const nextCover = req.body.cover !== undefined ? String(req.body.cover || '').trim() : video.cover || '';
-  const resolvedCover = nextCover || getVideoCoverFromUrl(nextUrl) || video.cover || 'https://images.unsplash.com/photo-1516321165247-4aa89a48be28?auto=format&fit=crop&w=1200&q=80';
+  const coverIsCustom = req.body.cover !== undefined ? Boolean(nextCover) : Boolean(video.coverIsCustom);
+  const resolvedCover = coverIsCustom ? nextCover : getVideoCoverFromUrl(nextUrl);
 
   video.title = title;
   video.price = price;
@@ -993,9 +1006,10 @@ app.patch('/api/admin/videos/:id', authenticate, requireAdmin, async (req, res) 
   if (req.body.packagePrice !== undefined) video.packagePrice = Number(req.body.packagePrice) || 0;
   video.url = nextUrl;
   video.cover = resolvedCover;
+  video.coverIsCustom = coverIsCustom;
 
   if (mongoReady) {
-    await Video.updateOne({ id: video.id }, { $set: { title: video.title, url: video.url, cover: video.cover, price: video.price, grade: video.grade, term: video.term, unitId: video.unitId, packagePrice: video.packagePrice } });
+    await Video.updateOne({ id: video.id }, { $set: { title: video.title, url: video.url, cover: video.cover, coverIsCustom: video.coverIsCustom, price: video.price, grade: video.grade, term: video.term, unitId: video.unitId, packagePrice: video.packagePrice } });
   }
 
   res.json({ video, videos: videoCatalog });

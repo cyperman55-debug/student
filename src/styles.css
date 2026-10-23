@@ -3178,6 +3178,16 @@ animation: robot-idle 6s ease-in-out infinite, robot-step-in 720ms cubic-bezier(
   transition: transform 0.3s ease;
 }
 
+.lesson-video-cover-placeholder {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  background: linear-gradient(135deg, #1d4ed8, #123f73);
+  color: #ffffff;
+  font-size: 2rem;
+}
+
 .lesson-video-cover:hover img {
   transform: scale(1.035);
 }
