@@ -350,15 +350,23 @@ const paymentSettings = {
 };
 const activityLog = [];
 
-function studentCanAccessVideo(student, video) {
+function studentCanAccessVideo(student, video, purchases = videoPurchases) {
   const key = packageKey(video.grade, video.term, video.unitId);
   return Boolean(
     student.contentUnlocked
     || student.contentAccess?.all
     || student.contentAccess?.packages?.includes(key)
     || student.contentAccess?.videoIds?.includes(video.id)
-    || videoPurchases.some((purchase) => purchase.videoId === video.id && purchase.studentId === student.id)
+    || purchases.some((purchase) => purchase.videoId === video.id && purchase.studentId === student.id)
   );
+}
+
+function studentHasAnyVideoAccess(student, purchases = videoPurchases) {
+  const grade = student.grade || 'second-secondary';
+  const term = student.term || '';
+  return videoCatalog.some((video) => video.grade === grade
+    && (grade === 'first-secondary' || !video.term || video.term === term)
+    && studentCanAccessVideo(student, video, purchases));
 }
 
 function optionIndex(label) {
@@ -765,14 +773,17 @@ app.get('/api/dashboard', authenticate, async (req, res) => {
   if (currentUser.role === 'admin') {
     const students = users.filter((item) => item.role === 'student');
     let totalStudents = students.length;
-    let activeStudents = students.filter((student) => student.balance > 0 || student.contentUnlocked).length;
+    let activeStudents = students.filter((student) => studentHasAnyVideoAccess(student)).length;
 
     if (mongoReady) {
       try {
-        [totalStudents, activeStudents] = await Promise.all([
+        const [databaseStudents, databaseVideoPurchases, databaseStudentCount] = await Promise.all([
+          User.find({ role: 'student' }).select('id grade term contentUnlocked contentAccess').lean(),
+          VideoPurchase.find({ videoId: { $in: videoCatalog.map((video) => video.id) } }).select('studentId videoId').lean(),
           User.countDocuments({ role: 'student' }),
-          User.countDocuments({ role: 'student', $or: [{ balance: { $gt: 0 } }, { contentUnlocked: true }] }),
         ]);
+        totalStudents = databaseStudentCount;
+        activeStudents = databaseStudents.filter((student) => studentHasAnyVideoAccess(student, databaseVideoPurchases)).length;
       } catch (error) {
         console.error(`Student count query failed: ${error.message}`);
         return res.status(503).json({ message: 'تعذر تحميل إحصائيات الطلاب' });
