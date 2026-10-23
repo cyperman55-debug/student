@@ -356,19 +356,6 @@ function CyberGlobe() {
   return <div ref={containerRef} className="cyber-globe" aria-hidden="true" />;
 }
 
-function CreditFooter() {
-  return (
-    <footer className="credit-footer">
-           
-  <a href="https://www.instagram.com/tarekhus72?stkn=dWJlZjB6MHd3Z2Zx&utm_source=qr" target="_blank" rel="noreferrer">
-      
-       RIOT.OSI{' '} تم البرمجة والتصميم بواسطه 
-
-      </a>
-    </footer>
-  );
-}
-
 const publicStages = [
   {
     id: 1,
@@ -1873,7 +1860,6 @@ function App() {
             </form>
             </div>
           </div>}
-          <CreditFooter />
         </main>
       </div>
     );
@@ -1883,7 +1869,6 @@ function App() {
     return (
       <div className="auth-loading-screen">
         <div className="loading-card">جاري استعادة الجلسة...</div>
-        <CreditFooter />
       </div>
     );
   }
@@ -1951,7 +1936,6 @@ function App() {
               {!quizResult ? <button type="submit" className="primary-btn quiz-finish-btn">إنهاء الاختبار وتصحيح الإجابات</button> : <div className="quiz-final-result">نتيجتك: {quizResult.score} من {quizResult.total} ({Math.round((quizResult.score / quizResult.total) * 100)}%)</div>}
             </form>
           </main>
-          <CreditFooter />
         </div>
       );
     }
@@ -2038,7 +2022,6 @@ function App() {
               </div>
             </section>}
           </main>
-          <CreditFooter />
         </div>
       );
     }
@@ -2129,7 +2112,6 @@ function App() {
               </section>}
             </>}
           </main>
-          <CreditFooter />
         </div>
       );
     }
@@ -2326,7 +2308,6 @@ function App() {
             </form>
           </section>
         </div>}
-        <CreditFooter />
       </div>
     );
   }
@@ -2916,7 +2897,6 @@ function App() {
             </section>}
           </>
         )}
-        <CreditFooter />
       </main>
     </div>
   );
