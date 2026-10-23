@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import heroImage from '../WhatsApp Image 2026-09-30 at 4.14.49 AM.jpeg';
-import RobotAssistant from './RobotAssistant';
 
 const cloudflareApiUrl = 'https://student-puce-one.vercel.app/api';
 const usesSameOriginApi = typeof window === 'undefined'
@@ -2005,6 +2004,7 @@ function App() {
                       src={selectedLesson.url}
                       title={`شرح المحاضرة: ${selectedLesson.title}`}
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      referrerPolicy="strict-origin-when-cross-origin"
                       allowFullScreen
                     />
                     <div className="video-watermark" aria-hidden="true">{user.email} • {user.name}</div>
@@ -2136,8 +2136,6 @@ function App() {
 
     return (
       <div className="student-shell student-home-shell">
-        {/* Robot assistant (purely visual, non-interrupting) */}
-        <RobotAssistant />
         <header className="student-header student-dashboard-header">
           <div className="student-header-title">
             <p className="eyebrow">مساحة التعلم</p>
@@ -2635,6 +2633,7 @@ function App() {
                           src={selectedAdminLecture.url}
                           title={selectedAdminLecture.title}
                           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          referrerPolicy="strict-origin-when-cross-origin"
                           allowFullScreen
                           className="video-frame"
                         />
@@ -2777,7 +2776,7 @@ function App() {
               <div className="panel admin-add-panel">
                 <div className="video-form-header">
                   <h3>إضافة محاضرة جديدة</h3>
-                  <p>اختر الصف والوحدة، ثم أضف محاضرتك مع رابط الفيديو، الغلاف، ومكانها داخل المنهج.</p>
+                  <p>اختر الصف والوحدة، ثم أضف محاضرتك مع رابط الفيديو، والغلاف يختياري، وسيتم استخراج غلاف YouTube تلقائيًا إذا تركته فارغًا.</p>
                 </div>
 
                 <form onSubmit={handleAddVideo} className="video-form">
@@ -2816,8 +2815,8 @@ function App() {
                   </label>
 
                   <label>
-                    رابط غلاف المحاضرة
-                    <input type="url" value={videoCover} onChange={(event) => setVideoCover(event.target.value)} placeholder="https://example.com/cover.jpg" />
+                    رابط غلاف المحاضرة (اختياري)
+                    <input type="url" value={videoCover} onChange={(event) => setVideoCover(event.target.value)} placeholder="اتركه فارغًا وسيتم أخذ غلاف YouTube تلقائيًا" />
                   </label>
 
                   <label>

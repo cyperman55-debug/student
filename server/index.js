@@ -132,8 +132,20 @@ function normalizeVideoUrl(value) {
   const iframeMatch = input.match(/<iframe[^>]+src=["']([^"']+)["']/i);
   const rawUrl = (iframeMatch ? iframeMatch[1] : input).trim();
   const url = rawUrl.replace('://player.mediadelivery.net/', '://iframe.mediadelivery.net/');
-  const youtubeMatch = url.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/)|youtu\.be\/)([\w-]{6,})/i);
+  const youtubeMatch = url.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/|embed\/)|youtu\.be\/|youtube-nocookie\.com\/embed\/)([\w-]{6,})/i);
   return youtubeMatch ? `https://www.youtube.com/embed/${youtubeMatch[1]}` : url;
+}
+
+function getVideoCoverFromUrl(value) {
+  const input = String(value || '').trim();
+  if (!input) return '';
+
+  const iframeMatch = input.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+  const rawUrl = (iframeMatch ? iframeMatch[1] : input).trim();
+  const youtubeMatch = rawUrl.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/|embed\/)|youtu\.be\/|youtube-nocookie\.com\/embed\/)([\w-]{6,})/i);
+  if (!youtubeMatch) return '';
+
+  return `https://img.youtube.com/vi/${youtubeMatch[1]}/maxresdefault.jpg`;
 }
 
 const initializeMongo = () => mongoConfigured
@@ -157,13 +169,27 @@ const initializeMongo = () => mongoConfigured
         const savedUsers = await User.find().lean();
         if (savedUsers.length) {
           users.splice(0, users.length, ...savedUsers);
+        }
+
+        if (defaultAdmin) {
           const adminUser = users.find((user) => user.role === 'admin' && user.id === 1)
-            || users.find((user) => user.role === 'admin');
-          if (adminUser && adminUser.phone !== '01065870208') {
-            adminUser.phone = '01065870208';
-            await User.updateOne({ id: adminUser.id }, { $set: { phone: adminUser.phone } });
+            || users.find((user) => user.role === 'admin')
+            || { ...defaultAdmin };
+
+          Object.assign(adminUser, defaultAdmin, { id: 1, role: 'admin' });
+          const adminIndex = users.findIndex((user) => user.role === 'admin' && user.id === 1);
+          if (adminIndex >= 0) {
+            users[adminIndex] = adminUser;
+          } else {
+            users.unshift(adminUser);
           }
-        } else {
+
+          if (savedUsers.length) {
+            await User.updateOne({ id: 1 }, { $set: defaultAdmin }, { upsert: true });
+          } else {
+            await User.insertMany(users);
+          }
+        } else if (!savedUsers.length && users.length) {
           await User.insertMany(users);
         }
         const savedVideos = await Video.find().lean();
@@ -253,7 +279,39 @@ function requireMongo(res) {
   return true;
 }
 
-const users = [];
+const createDefaultAdmin = () => {
+  const name = String(process.env.ADMIN_NAME || '').trim();
+  const phone = String(process.env.ADMIN_PHONE || '').trim();
+  const password = String(process.env.ADMIN_PASSWORD || '');
+  const hasAdminConfig = Boolean(name || phone || password);
+
+  if (!hasAdminConfig) return null;
+  if (!name || !phone || !password) {
+    throw new Error('ADMIN_NAME, ADMIN_PHONE, and ADMIN_PASSWORD must all be configured together.');
+  }
+
+  return {
+    id: 1,
+    name,
+    email: '',
+    grade: 'second-secondary',
+    term: '',
+    studentNumber: '',
+    guardianPhone: '',
+    governorate: 'القاهرة',
+    phone,
+    avatar: '',
+    passwordHash: bcrypt.hashSync(password, 10),
+    role: 'admin',
+    status: 'active',
+    balance: 0,
+    contentUnlocked: true,
+    contentAccess: { all: true, videoIds: [], packages: [] },
+  };
+};
+
+const defaultAdmin = createDefaultAdmin();
+const users = defaultAdmin ? [defaultAdmin] : [];
 
 const chatMessages = [
   {
@@ -820,11 +878,12 @@ app.post('/api/admin/videos', authenticate, requireAdmin, async (req, res) => {
   if (!Number.isFinite(price) || price < 0) return res.status(400).json({ message: 'سعر المحاضرة يجب أن يكون صفرًا أو أكثر' });
   if (!Number.isFinite(packagePrice) || packagePrice < 0) return res.status(400).json({ message: 'سعر الباكدج يجب أن يكون صفرًا أو أكثر' });
 
+  const fallbackCover = getVideoCoverFromUrl(url) || 'https://images.unsplash.com/photo-1516321165247-4aa89a48be28?auto=format&fit=crop&w=1200&q=80';
   const video = {
     id: videoCatalog.length ? Math.max(...videoCatalog.map((item) => Number(item.id))) + 1 : 1,
     title,
     url,
-    cover: cover || 'https://images.unsplash.com/photo-1516321165247-4aa89a48be28?auto=format&fit=crop&w=1200&q=80',
+    cover: cover || fallbackCover,
     price,
     grade,
     term,
@@ -922,14 +981,18 @@ app.patch('/api/admin/videos/:id', authenticate, requireAdmin, async (req, res) 
   if (!title) return res.status(400).json({ message: 'عنوان المحاضرة مطلوب' });
   if (!Number.isFinite(price) || price < 0) return res.status(400).json({ message: 'سعر المحاضرة يجب أن يكون صفرًا أو أكثر' });
 
+  const nextUrl = req.body.url ? normalizeVideoUrl(req.body.url) : video.url;
+  const nextCover = req.body.cover !== undefined ? String(req.body.cover || '').trim() : video.cover || '';
+  const resolvedCover = nextCover || getVideoCoverFromUrl(nextUrl) || video.cover || 'https://images.unsplash.com/photo-1516321165247-4aa89a48be28?auto=format&fit=crop&w=1200&q=80';
+
   video.title = title;
   video.price = price;
   if (req.body.grade) video.grade = req.body.grade;
   if (req.body.term !== undefined) video.term = String(req.body.term || '');
   if (req.body.unitId !== undefined) video.unitId = Number(req.body.unitId) || 1;
   if (req.body.packagePrice !== undefined) video.packagePrice = Number(req.body.packagePrice) || 0;
-  if (req.body.url) video.url = normalizeVideoUrl(req.body.url);
-  if (req.body.cover) video.cover = String(req.body.cover).trim();
+  video.url = nextUrl;
+  video.cover = resolvedCover;
 
   if (mongoReady) {
     await Video.updateOne({ id: video.id }, { $set: { title: video.title, url: video.url, cover: video.cover, price: video.price, grade: video.grade, term: video.term, unitId: video.unitId, packagePrice: video.packagePrice } });

@@ -45,6 +45,7 @@ Add these Environment Variables in Vercel before deploying:
 - `MONGODB_URI`
 - `JWT_SECRET`
 - `VODAFONE_CASH_NUMBER`
+- Optionally, `ADMIN_NAME`, `ADMIN_PHONE`, and `ADMIN_PASSWORD` together to seed or update the initial admin account. Keep the password in Vercel Environment Variables; never commit it.
 
 Never commit `.env` or Atlas credential files. Use `.env.example` as the public template.
 

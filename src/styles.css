@@ -474,9 +474,9 @@ p {
   --hero-tilt-y: 0deg;
   --hero-shift-x: 0px;
   --hero-shift-y: 0px;
-  transform: rotateY(var(--hero-tilt-x)) rotateX(var(--hero-tilt-y));
-  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform;
+  transform: none;
+  transition: none;
+  will-change: auto;
 }
 
 .hero-image-card {
@@ -488,10 +488,10 @@ p {
   background: #dce8f8;
   border: 1px solid var(--line);
   box-shadow: 18px 18px 0 rgba(216, 168, 78, 0.22), 0 25px 60px rgba(42, 73, 112, 0.16);
-  transform: rotateY(-7deg) rotateX(3deg);
-  translate: var(--hero-shift-x) var(--hero-shift-y);
-  transition: translate 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-  animation: hero-float 6s ease-in-out infinite, hero-card-glow 4s ease-in-out infinite;
+  transform: none;
+  translate: 0 0;
+  transition: none;
+  animation: none;
 }
 
 .hero-image-card img {
