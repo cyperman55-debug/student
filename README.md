@@ -5,7 +5,7 @@ React/Vite educational platform with an Express API and MongoDB persistence.
 ## Local development
 
 1. Copy `.env.example` to `.env`.
-2. Fill in `MONGODB_URI` and `JWT_SECRET`.
+2. Fill in `MONGODB_URI` and `JWT_SECRET`. `MONGODB_DNS_SERVERS` is optional; the local API uses it to retry MongoDB SRV lookups if the system DNS resolver returns `EBADRESP`.
 3. Install dependencies:
 
 ```bash

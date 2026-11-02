@@ -33,6 +33,79 @@ function formatContentLocation(item) {
   return `تانية ثانوي - الوحدة ${item.unitId || 1}`;
 }
 
+function getOrderedLessonResources(lesson) {
+  return [
+    ...(lesson?.videos || []).map((video) => ({ type: 'video', id: video.id, createdAt: video.createdAt, video })),
+    ...(lesson?.pdfs || []).map((pdf) => ({ type: 'pdf', id: pdf.id, createdAt: pdf.createdAt, pdf })),
+  ].sort((left, right) => new Date(left.createdAt || 0) - new Date(right.createdAt || 0) || String(left.id).localeCompare(String(right.id)));
+}
+
+function getPlayableVideoUrl(value) {
+  const input = String(value || '').trim();
+  const iframeMatch = input.match(/<iframe\b[^>]*\bsrc\s*=\s*(["'])(.*?)\1[^>]*>/i);
+  const rawUrl = iframeMatch ? iframeMatch[2] : input;
+  try {
+    const videoUrl = new URL(rawUrl.startsWith('//') ? `https:${rawUrl}` : rawUrl);
+    if (videoUrl.protocol === 'http:') videoUrl.protocol = 'https:';
+    const host = videoUrl.hostname.toLowerCase().replace(/^www\./, '');
+    const pathParts = videoUrl.pathname.split('/').filter(Boolean);
+
+    if (['youtube.com', 'm.youtube.com', 'youtube-nocookie.com', 'youtu.be'].includes(host)) {
+      const videoId = host === 'youtu.be'
+        ? pathParts[0]
+        : videoUrl.searchParams.get('v') || pathParts.find((part, index) => ['embed', 'shorts', 'live', 'v'].includes(pathParts[index - 1]));
+      if (videoId && /^[\w-]{6,}$/.test(videoId)) return `https://www.youtube.com/embed/${videoId}`;
+    }
+
+    if (host === 'vimeo.com' || host === 'player.vimeo.com') {
+      const videoIdIndex = host === 'player.vimeo.com'
+        ? pathParts.indexOf('video') + 1
+        : pathParts.findIndex((part) => /^\d+$/.test(part));
+      const videoId = pathParts[videoIdIndex];
+      if (videoId && /^\d+$/.test(videoId)) {
+        const accessHash = videoUrl.searchParams.get('h') || pathParts[videoIdIndex + 1];
+        videoUrl.hostname = 'player.vimeo.com';
+        videoUrl.pathname = `/video/${videoId}`;
+        if (accessHash) videoUrl.searchParams.set('h', accessHash);
+        return videoUrl.toString();
+      }
+    }
+
+    if (host === 'drive.google.com' || host === 'docs.google.com') {
+      const fileId = videoUrl.pathname.match(/\/file\/d\/([^/]+)/)?.[1] || videoUrl.searchParams.get('id');
+      if (fileId) {
+        const previewUrl = new URL(`https://drive.google.com/file/d/${encodeURIComponent(fileId)}/preview`);
+        const resourceKey = videoUrl.searchParams.get('resourcekey');
+        if (resourceKey) previewUrl.searchParams.set('resourcekey', resourceKey);
+        return previewUrl.toString();
+      }
+    }
+
+    const bunnyParts = videoUrl.pathname.match(/^\/(?:video|play|embed)\/(\d+)\/([\w-]+)/i);
+    if ((host === 'iframe.mediadelivery.net' || host === 'player.mediadelivery.net') && bunnyParts) {
+      videoUrl.hostname = 'player.mediadelivery.net';
+      videoUrl.pathname = `/embed/${bunnyParts[1]}/${bunnyParts[2]}`;
+    }
+    return videoUrl.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
+function getDirectVideoPageUrl(value) {
+  const playableUrl = getPlayableVideoUrl(value);
+  try {
+    const videoUrl = new URL(playableUrl);
+    if (videoUrl.hostname === 'player.mediadelivery.net') {
+      const bunnyParts = videoUrl.pathname.match(/^\/embed\/(\d+)\/([\w-]+)/i);
+      if (bunnyParts) videoUrl.pathname = `/play/${bunnyParts[1]}/${bunnyParts[2]}`;
+    }
+    return videoUrl.toString();
+  } catch {
+    return playableUrl;
+  }
+}
+
 const moneyNumberFormatter = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 
 function CurrencyAmount({ amount }) {
@@ -358,11 +431,10 @@ function CyberGlobe() {
 
 const publicStages = [
   {
-    id: 1,
-    title: 'الصف الثاني الثانوي بكالوريا',
-    subtitle: 'برمجة وذكاء اصطناعي بأسلوب عملي مبسط',
-    image:
-      'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80',
+    id: 'first-unit',
+    title: '\u0627\u0644\u0648\u062d\u062f\u0629 \u0627\u0644\u0623\u0648\u0644\u0649',
+    subtitle: '\u0627\u0628\u062f\u0623 \u062a\u0639\u0644\u0645 \u0623\u0633\u0627\u0633\u064a\u0627\u062a \u0627\u0644\u0628\u0631\u0645\u062c\u0629 \u0648\u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0627\u0635\u0637\u0646\u0627\u0639\u064a',
+    image: '',
   },
 ];
 
@@ -431,10 +503,14 @@ function App() {
   const [token, setToken] = useState(localStorage.getItem(SESSION_TOKEN_KEY) || '');
   const [user, setUser] = useState(null);
   const [dashboard, setDashboard] = useState(null);
+  const [publicStageUnits, setPublicStageUnits] = useState(publicStages);
+  const [publicQuizLeaders, setPublicQuizLeaders] = useState([]);
   const [authLoading, setAuthLoading] = useState(Boolean(localStorage.getItem(SESSION_TOKEN_KEY)));
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [videoTitle, setVideoTitle] = useState('');
+  const [lessonTitle, setLessonTitle] = useState('');
+  const [videoLessonId, setVideoLessonId] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
   const [videoCover, setVideoCover] = useState('');
   const [newLecturePdfFile, setNewLecturePdfFile] = useState(null);
@@ -446,6 +522,7 @@ function App() {
   const [lessonPdfUploading, setLessonPdfUploading] = useState(false);
   const [lessonPdfDeleting, setLessonPdfDeleting] = useState(null);
   const [lessonPdfUploadMessage, setLessonPdfUploadMessage] = useState('');
+  const [lessonPdfUploadLessonId, setLessonPdfUploadLessonId] = useState(null);
   const [lessonPdfUploadVideoId, setLessonPdfUploadVideoId] = useState(null);
   const [lessonPdfGrade, setLessonPdfGrade] = useState('second-secondary');
   const [lessonPdfTerm, setLessonPdfTerm] = useState('first-term');
@@ -454,6 +531,7 @@ function App() {
   const [lessonPdfUrl, setLessonPdfUrl] = useState('');
   const [lessonPdfLoading, setLessonPdfLoading] = useState(null);
   const [playingLessonVideoId, setPlayingLessonVideoId] = useState(null);
+  const [videoPlaybackError, setVideoPlaybackError] = useState(null);
   const [videoGrade, setVideoGrade] = useState('second-secondary');
   const [videoTerm, setVideoTerm] = useState('');
   const [videoUnitId, setVideoUnitId] = useState('1');
@@ -462,11 +540,15 @@ function App() {
   const [editingVideoId, setEditingVideoId] = useState(null);
   const [editingVideoTitle, setEditingVideoTitle] = useState('');
   const [editingVideoUrl, setEditingVideoUrl] = useState('');
+  const [editingVideoPrice, setEditingVideoPrice] = useState('0');
   const [editingVideoCover, setEditingVideoCover] = useState('');
   const [editingVideoCoverIsCustom, setEditingVideoCoverIsCustom] = useState(false);
   const [videos, setVideos] = useState(defaultVideos);
   const [selectedVideo, setSelectedVideo] = useState(defaultVideos[0]);
   const [selectedAdminLectureId, setSelectedAdminLectureId] = useState(null);
+  const [selectedAdminLessonId, setSelectedAdminLessonId] = useState(null);
+  const [lectureManagementView, setLectureManagementView] = useState('list');
+  const [editingLessonTitle, setEditingLessonTitle] = useState('');
   const [selectedAdminQuizId, setSelectedAdminQuizId] = useState(null);
   const [publicStudents, setPublicStudents] = useState([]);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -487,6 +569,22 @@ function App() {
   const [editingQuizId, setEditingQuizId] = useState(null);
   const [editingQuizTitle, setEditingQuizTitle] = useState('');
   const [editingQuizDescription, setEditingQuizDescription] = useState('');
+  const [essayQuestionText, setEssayQuestionText] = useState('');
+  const [essayModelAnswer, setEssayModelAnswer] = useState('');
+  const [essayPoints, setEssayPoints] = useState('5');
+  const [standaloneEssayOpen, setStandaloneEssayOpen] = useState(false);
+  const [standaloneEssayTitle, setStandaloneEssayTitle] = useState('');
+  const [standaloneEssayDescription, setStandaloneEssayDescription] = useState('');
+  const [standaloneEssayGrade, setStandaloneEssayGrade] = useState('second-secondary');
+  const [standaloneEssayTerm, setStandaloneEssayTerm] = useState('');
+  const [standaloneEssayUnitId, setStandaloneEssayUnitId] = useState('1');
+  const [standaloneEssayLessonId, setStandaloneEssayLessonId] = useState('');
+  const [standaloneEssayText, setStandaloneEssayText] = useState('');
+  const [standaloneEssayModelAnswer, setStandaloneEssayModelAnswer] = useState('');
+  const [standaloneEssayPoints, setStandaloneEssayPoints] = useState('5');
+  const [standaloneEssayQuestions, setStandaloneEssayQuestions] = useState([]);
+  const [standaloneEssayMessage, setStandaloneEssayMessage] = useState('');
+  const [standaloneEssaySaving, setStandaloneEssaySaving] = useState(false);
   const [questionText, setQuestionText] = useState('');
   const [questionOptions, setQuestionOptions] = useState(['', '', '', '']);
   const [correctOption, setCorrectOption] = useState('0');
@@ -503,6 +601,7 @@ function App() {
   const [quizUnitId, setQuizUnitId] = useState('1');
   const [quizLessonId, setQuizLessonId] = useState('');
   const [paymentOpen, setPaymentOpen] = useState(false);
+  const [paymentNotice, setPaymentNotice] = useState('');
   const [paymentSettings, setPaymentSettings] = useState(null);
   const [rechargeRequests, setRechargeRequests] = useState([]);
   const [rechargeAmount, setRechargeAmount] = useState('');
@@ -539,6 +638,32 @@ function App() {
   }, [videos, selectedAdminLectureId]);
 
   useEffect(() => {
+    const adminLessons = dashboard?.lessons || [];
+    if (!adminLessons.length) {
+      setSelectedAdminLessonId(null);
+      return;
+    }
+    if (!adminLessons.some((lesson) => String(lesson.id) === String(selectedAdminLessonId))) {
+      setSelectedAdminLessonId(adminLessons[0].id);
+      setEditingLessonTitle(adminLessons[0].title);
+    }
+  }, [dashboard?.lessons, selectedAdminLessonId]);
+
+  useEffect(() => {
+    const lesson = dashboard?.lessons?.find((item) => String(item.id) === String(selectedAdminLessonId));
+    if (lesson) setEditingLessonTitle(lesson.title);
+  }, [dashboard?.lessons, selectedAdminLessonId]);
+
+  useEffect(() => {
+    const lesson = dashboard?.lessons?.find((item) => String(item.id) === String(selectedAdminLessonId));
+    if (!lesson?.videos.length || lesson.videos.some((video) => String(video.id) === String(selectedAdminLectureId))) return;
+    const firstVideo = lesson.videos[0];
+    setSelectedAdminLectureId(String(firstVideo.id));
+    setSelectedVideo(firstVideo);
+    startEditVideo(firstVideo);
+  }, [dashboard?.lessons, selectedAdminLessonId, selectedAdminLectureId]);
+
+  useEffect(() => {
     if (!quizList.length) {
       setSelectedAdminQuizId(null);
       return;
@@ -550,6 +675,9 @@ function App() {
   }, [quizList, selectedAdminQuizId]);
 
   const selectedAdminLecture = videos.find((video) => String(video.id) === String(selectedAdminLectureId)) || videos[0] || null;
+  const selectedAdminLesson = dashboard?.lessons?.find((lesson) => String(lesson.id) === String(selectedAdminLessonId)) || null;
+  const selectedAdminLessonResources = getOrderedLessonResources(selectedAdminLesson);
+  const adminLessons = dashboard?.lessons || [];
   const selectedAdminQuiz = quizList.find((quiz) => String(quiz.id) === String(selectedAdminQuizId)) || quizList[0] || null;
 
   const scrollToLogin = () => {
@@ -650,6 +778,41 @@ function App() {
       .then((data) => setPublicStudents(data.students || []))
       .catch(() => setPublicStudents([]));
   }, []);
+
+  useEffect(() => {
+    if (token) return undefined;
+    const controller = new AbortController();
+    fetch(`${API_URL}/public/units/second-secondary`, { signal: controller.signal })
+      .then(readApiResponse)
+      .then((data) => {
+        if (Array.isArray(data.units) && data.units.length) {
+          setPublicStageUnits(data.units.map((unit) => ({ ...unit, subtitle: publicStages[0].subtitle })));
+        }
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [token]);
+
+  useEffect(() => {
+    if (token) return undefined;
+    let active = true;
+    const loadQuizLeaders = () => {
+      fetch(`${API_URL}/public/quiz-leaderboard`)
+        .then((response) => response.ok ? response.json() : { students: [] })
+        .then((data) => {
+          if (active) setPublicQuizLeaders(Array.isArray(data.students) ? data.students : []);
+        })
+        .catch(() => {});
+    };
+    loadQuizLeaders();
+    const refreshTimer = window.setInterval(loadQuizLeaders, 30000);
+    window.addEventListener('focus', loadQuizLeaders);
+    return () => {
+      active = false;
+      window.clearInterval(refreshTimer);
+      window.removeEventListener('focus', loadQuizLeaders);
+    };
+  }, [token]);
 
   useEffect(() => {
     const isEditableTarget = (target) => ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName) || target?.isContentEditable;
@@ -954,6 +1117,96 @@ function App() {
     }
   };
 
+  const addEssayQuestion = async (event) => {
+    event.preventDefault();
+    if (!selectedAdminQuiz) return;
+    try {
+      const response = await fetch(`${API_URL}/admin/quizzes/${selectedAdminQuiz.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ addQuestion: { type: 'essay', text: essayQuestionText, modelAnswer: essayModelAnswer, points: Number(essayPoints) } }),
+      });
+      const data = await readApiResponse(response);
+      if (!response.ok) throw new Error(data.message || 'تعذر إضافة السؤال');
+      setQuizList((current) => current.map((item) => String(item.id) === String(data.quiz.id) ? data.quiz : item));
+      setEssayQuestionText('');
+      setEssayModelAnswer('');
+      setEssayPoints('5');
+      setStudentActionMessage('تمت إضافة السؤال المقالي إلى الاختبار.');
+    } catch (err) {
+      setError(err.message || 'تعذر إضافة السؤال المقالي');
+    }
+  };
+
+  const appendStandaloneEssayQuestion = (event) => {
+    event.preventDefault();
+    const text = standaloneEssayText.trim();
+    const points = Number(standaloneEssayPoints);
+    if (!text || !Number.isFinite(points) || points < 0.1 || points > 100) {
+      setStandaloneEssayMessage('اكتب نص السؤال وحدد درجة بين 0.1 و100.');
+      return;
+    }
+    setStandaloneEssayQuestions((current) => [...current, {
+      id: `${Date.now()}-${Math.random()}`,
+      text,
+      modelAnswer: standaloneEssayModelAnswer.trim(),
+      points,
+    }]);
+    setStandaloneEssayText('');
+    setStandaloneEssayModelAnswer('');
+    setStandaloneEssayPoints('5');
+    setStandaloneEssayMessage('تمت إضافة السؤال إلى المسودة. يمكنك إضافة السؤال التالي.');
+  };
+
+  const saveStandaloneEssayQuiz = async () => {
+    if (!standaloneEssayTitle.trim()) {
+      setStandaloneEssayMessage('اكتب اسم الاختبار أولًا.');
+      return;
+    }
+    if (standaloneEssayGrade === 'first-secondary' && !standaloneEssayTerm) {
+      setStandaloneEssayMessage('اختر الترم الدراسي قبل حفظ الاختبار.');
+      return;
+    }
+    if (!standaloneEssayQuestions.length) {
+      setStandaloneEssayMessage('أضف سؤالًا مقاليًا واحدًا على الأقل قبل الحفظ.');
+      return;
+    }
+    setStandaloneEssaySaving(true);
+    setStandaloneEssayMessage('جارٍ حفظ الاختبار المقالي...');
+    try {
+      const response = await fetch(`${API_URL}/admin/quizzes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          title: standaloneEssayTitle.trim(),
+          description: standaloneEssayDescription.trim(),
+          price: 0,
+          packagePrice: 0,
+          grade: standaloneEssayGrade,
+          term: standaloneEssayGrade === 'first-secondary' ? standaloneEssayTerm : '',
+          unitId: Number(standaloneEssayUnitId),
+          lessonId: standaloneEssayLessonId,
+          questions: standaloneEssayQuestions.map(({ text, modelAnswer, points }) => ({ type: 'essay', text, modelAnswer, points })),
+        }),
+      });
+      const data = await readApiResponse(response);
+      if (!response.ok) throw new Error(data.message || 'تعذر حفظ الاختبار المقالي.');
+      setQuizList((current) => [...current, data.quiz]);
+      setSelectedAdminQuizId(String(data.quiz.id));
+      setStandaloneEssayTitle('');
+      setStandaloneEssayDescription('');
+      setStandaloneEssayTerm('');
+      setStandaloneEssayLessonId('');
+      setStandaloneEssayQuestions([]);
+      setStandaloneEssayMessage('تم حفظ الاختبار المقالي وإضافته إلى قائمة الاختبارات.');
+      setStudentActionMessage('تم إنشاء الاختبار المقالي بنجاح.');
+    } catch (err) {
+      setStandaloneEssayMessage(err.message || 'تعذر حفظ الاختبار المقالي.');
+    } finally {
+      setStandaloneEssaySaving(false);
+    }
+  };
+
   const importPdf = async (event) => {
     event.preventDefault();
     if (!pdfFile) return;
@@ -1026,7 +1279,7 @@ function App() {
       return;
     }
 
-    const lectureTitle = selectedAdminLecture.title.trim();
+    const lectureTitle = selectedAdminLesson?.title.trim() || selectedAdminLecture.title.trim();
     setLectureQuizSaving(true);
     try {
       const response = await fetch(`${API_URL}/admin/quizzes`, {
@@ -1037,10 +1290,10 @@ function App() {
           description: `اختبار مرتبط بمحاضرة: ${lectureTitle}`,
           price: 0,
           packagePrice: 0,
-          grade: selectedAdminLecture.grade || 'second-secondary',
-          term: selectedAdminLecture.grade === 'first-secondary' ? selectedAdminLecture.term || '' : '',
-          unitId: Number(selectedAdminLecture.unitId || 1),
-          lessonId: String(selectedAdminLecture.id),
+          grade: selectedAdminLesson?.grade || selectedAdminLecture.grade || 'second-secondary',
+          term: (selectedAdminLesson?.grade || selectedAdminLecture.grade) === 'first-secondary' ? selectedAdminLesson?.term || selectedAdminLecture.term || '' : '',
+          unitId: Number(selectedAdminLesson?.unitId || selectedAdminLecture.unitId || 1),
+          lessonId: String(selectedAdminLesson?.id || selectedAdminLecture.lessonId || selectedAdminLecture.id),
           questions: lectureQuizPreview.questions,
         }),
       });
@@ -1095,16 +1348,21 @@ function App() {
     }
   };
 
-  const openPaymentPage = async () => {
+  const openPaymentPage = async (notice = '') => {
+    setPaymentNotice(typeof notice === 'string' ? notice : '');
     setRechargeMessage('');
-    const response = await fetch(`${API_URL}/payment-settings`, { headers: { Authorization: `Bearer ${token}` } });
-    const data = await readApiResponse(response);
-    if (!response.ok) { setError(data.message || 'تعذر فتح صفحة الدفع'); return; }
-    const historyResponse = await fetch(`${API_URL}/recharge-requests/my`, { headers: { Authorization: `Bearer ${token}` } });
-    const historyData = await readApiResponse(historyResponse);
-    setPaymentSettings(data.settings);
-    setRechargeRequests(historyData.requests || []);
     setPaymentOpen(true);
+    try {
+      const response = await fetch(`${API_URL}/payment-settings`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await readApiResponse(response);
+      if (!response.ok) throw new Error(data.message || 'تعذر تحميل بيانات الدفع');
+      setPaymentSettings(data.settings);
+      const historyResponse = await fetch(`${API_URL}/recharge-requests/my`, { headers: { Authorization: `Bearer ${token}` } });
+      const historyData = await readApiResponse(historyResponse);
+      if (historyResponse.ok) setRechargeRequests(historyData.requests || []);
+    } catch (err) {
+      setRechargeMessage(err.message || 'تعذر تحميل بيانات الدفع');
+    }
   };
 
   const submitRechargeRequest = async (event) => {
@@ -1148,7 +1406,14 @@ function App() {
     try {
       const response = await fetch(`${API_URL}/packages/${encodeURIComponent(contentPackage.packageKey)}/purchase`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
       const data = await readApiResponse(response);
-      if (!response.ok) { setError(data.message || 'تعذر شراء الباكدج'); return; }
+      if (!response.ok) {
+        if (response.status === 402) {
+          await openPaymentPage(data.message || 'رصيدك الحالي غير كافٍ لشراء هذه الوحدة.');
+          return;
+        }
+        setError(data.message || 'تعذر شراء الباكدج');
+        return;
+      }
       const refreshed = await fetchDashboard(token);
       setDashboard(refreshed);
       setUser(refreshed.user);
@@ -1295,8 +1560,8 @@ function App() {
   const handleAddVideo = async (event) => {
     event.preventDefault();
 
-    if (!videoTitle.trim() || !videoUrl.trim()) {
-      setVideoFormError('يرجى كتابة عنوان المحاضرة ورابطها');
+    if (!videoTitle.trim() || !videoUrl.trim() || (!videoLessonId && !lessonTitle.trim())) {
+      setVideoFormError('يرجى كتابة اسم الفيديو ورابطه، واسم المحاضرة عند إنشاء محاضرة جديدة');
       return;
     }
 
@@ -1304,12 +1569,26 @@ function App() {
       const response = await fetch(`${API_URL}/admin/videos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ title: videoTitle, url: videoUrl, cover: videoCover, price: 0, grade: videoGrade, term: videoGrade === 'first-secondary' ? videoTerm : '', unitId: Number(videoUnitId), packagePrice: 0 }),
+        body: JSON.stringify({
+          title: videoTitle,
+          lessonTitle: videoLessonId ? undefined : lessonTitle,
+          lessonId: videoLessonId ? Number(videoLessonId) : undefined,
+          url: videoUrl,
+          cover: videoCover,
+          price: 0,
+          grade: videoGrade,
+          term: videoGrade === 'first-secondary' ? videoTerm : '',
+          unitId: Number(videoUnitId),
+          packagePrice: 0,
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'تعذر حفظ المحاضرة');
       setVideos(data.videos || defaultVideos);
       setSelectedVideo(data.video);
+      setDashboard((current) => current ? { ...current, lessons: data.lessons || current.lessons } : current);
+      setSelectedAdminLessonId(data.video.lessonId);
+      setSelectedAdminLectureId(String(data.video.id));
       if (newLecturePdfFile) {
         const formData = new FormData();
         formData.append('pdf', newLecturePdfFile);
@@ -1330,6 +1609,7 @@ function App() {
       setVideoTerm('');
       setVideoUnitId('1');
       setVideoFormError('');
+      setLectureManagementView('list');
     } catch (err) {
       setVideoFormError(err.message || 'تعذر حفظ المحاضرة');
     }
@@ -1432,23 +1712,136 @@ function App() {
     }
   };
 
+  const uploadLessonPdfResource = async (lessonId) => {
+    if (!lessonPdfFile) {
+      setLessonPdfUploadMessage('اختر ملف PDF للمحاضرة أولًا.');
+      return;
+    }
+    if (!lessonPdfFile.name.toLowerCase().endsWith('.pdf') || lessonPdfFile.size > 10 * 1024 * 1024) {
+      setLessonPdfUploadMessage('ارفع ملف PDF صالحًا لا يتجاوز 10 ميجابايت.');
+      return;
+    }
+
+    setLessonPdfUploading(true);
+    setLessonPdfUploadMessage('جاري رفع ملف الشرح...');
+    try {
+      const formData = new FormData();
+      formData.append('pdf', lessonPdfFile);
+      const response = await fetch(`${API_URL}/admin/lessons/${lessonId}/pdfs`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const data = await readApiResponse(response);
+      if (!response.ok) throw new Error(data.message || 'تعذر رفع ملف الشرح');
+      setDashboard((current) => current ? {
+        ...current,
+        lessons: current.lessons.map((lesson) => lesson.id === lessonId ? { ...lesson, pdfs: data.pdfs || [] } : lesson),
+      } : current);
+      setLessonPdfFile(null);
+      setLessonPdfUploadLessonId(lessonId);
+      setLessonPdfUploadMessage('تمت إضافة ملف PDF للمحاضرة.');
+    } catch (err) {
+      setLessonPdfUploadMessage(err.message || 'تعذر رفع ملف الشرح');
+    } finally {
+      setLessonPdfUploading(false);
+    }
+  };
+
+  const deleteLessonPdfResource = async (lesson, pdf) => {
+    const confirmed = window.confirm(`هل تريد حذف ملف الشرح "${pdf.name}" من محاضرة "${lesson.title}"؟`);
+    if (!confirmed) return;
+    setLessonPdfDeleting(pdf.id);
+    setLessonPdfUploadMessage('جاري حذف ملف الشرح...');
+    try {
+      const response = await fetch(`${API_URL}/admin/lessons/${lesson.id}/pdfs/${encodeURIComponent(pdf.id)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await readApiResponse(response);
+      if (!response.ok) throw new Error(data.message || 'تعذر حذف ملف الشرح');
+      setDashboard((current) => current ? {
+        ...current,
+        lessons: current.lessons.map((item) => item.id === lesson.id ? { ...item, pdfs: data.pdfs || [] } : item),
+      } : current);
+      setLessonPdfUploadMessage('تم حذف ملف الشرح.');
+    } catch (err) {
+      setLessonPdfUploadMessage(err.message || 'تعذر حذف ملف الشرح');
+    } finally {
+      setLessonPdfDeleting(null);
+    }
+  };
+
+  const openLessonPdfResource = async (lessonId, pdf) => {
+    if (lessonPdfLoading === pdf.id) return;
+    if (lessonPdfVideoId === pdf.id) {
+      closeLessonPdf();
+      return;
+    }
+    setLessonPdfLoading(pdf.id);
+    try {
+      const response = await fetch(`${API_URL}/lessons/${lessonId}/pdfs/${encodeURIComponent(pdf.id)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || 'تعذر فتح ملف الشرح');
+      }
+      const pdfUrl = URL.createObjectURL(await response.blob());
+      closeLessonPdf();
+      lessonPdfObjectUrlRef.current = pdfUrl;
+      setLessonPdfUrl(pdfUrl);
+      setLessonPdfVideoId(pdf.id);
+    } catch (err) {
+      setError(err.message || 'تعذر فتح ملف الشرح');
+    } finally {
+      setLessonPdfLoading(null);
+    }
+  };
+
+  const saveLessonTitle = async () => {
+    if (!selectedAdminLesson || !editingLessonTitle.trim()) {
+      setVideoFormError('اسم المحاضرة مطلوب');
+      return;
+    }
+    try {
+      const response = await fetch(`${API_URL}/admin/lessons/${selectedAdminLesson.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ title: editingLessonTitle.trim() }),
+      });
+      const data = await readApiResponse(response);
+      if (!response.ok) throw new Error(data.message || 'تعذر تعديل اسم المحاضرة');
+      setDashboard((current) => current ? { ...current, lessons: data.lessons || current.lessons } : current);
+      setVideoFormError('');
+    } catch (err) {
+      setVideoFormError(err.message || 'تعذر تعديل اسم المحاضرة');
+    }
+  };
+
   const playLessonVideo = async (video) => {
     if (!video.url) return;
     if (playingLessonVideoId === video.id) {
       setPlayingLessonVideoId(null);
+      setVideoPlaybackError(null);
       return;
     }
 
+    setVideoPlaybackError(null);
+    setPlayingLessonVideoId(video.id);
     try {
       const response = await fetch(`${API_URL}/videos/${video.id}/view`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await readApiResponse(response);
-      if (!response.ok) throw new Error(data.message || 'تعذر تشغيل شرح المحاضرة');
-      setPlayingLessonVideoId(video.id);
+      if (!response.ok) {
+        setPlayingLessonVideoId(null);
+        setVideoPlaybackError({ id: video.id, message: data.message || 'لا تملك صلاحية مشاهدة هذه المحاضرة.' });
+      }
     } catch (err) {
-      setError(err.message || 'تعذر تشغيل شرح المحاضرة');
+      // The dashboard only returns a playable URL when the student has access.
+      // A failure in the activity log request should not block the video itself.
     }
   };
 
@@ -1488,6 +1881,7 @@ function App() {
     setEditingVideoId(video.id);
     setEditingVideoTitle(video.title);
     setEditingVideoUrl(video.url || '');
+    setEditingVideoPrice(String(Number(video.price ?? 0)));
     setEditingVideoCover(video.cover || '');
     setEditingVideoCoverIsCustom(Boolean(video.coverIsCustom));
     setVideoFormError('');
@@ -1497,6 +1891,7 @@ function App() {
     setEditingVideoId(null);
     setEditingVideoTitle('');
     setEditingVideoUrl('');
+    setEditingVideoPrice('0');
     setEditingVideoCover('');
     setEditingVideoCoverIsCustom(false);
   };
@@ -1514,12 +1909,17 @@ function App() {
       setVideoFormError('رابط شرح المحاضرة مطلوب');
       return;
     }
+    const videoPrice = Number(editingVideoPrice);
+    if (editingVideoPrice.trim() === '' || !Number.isFinite(videoPrice) || videoPrice < 0) {
+      setVideoFormError('أدخل سعرًا صحيحًا للمحاضرة أو اكتب 0 لتكون مجانية');
+      return;
+    }
 
     try {
       const response = await fetch(`${API_URL}/admin/videos/${video.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ title: trimmedTitle, url: editingVideoUrl.trim(), cover: editingVideoCoverIsCustom ? editingVideoCover : '', price: 0 }),
+        body: JSON.stringify({ title: trimmedTitle, url: editingVideoUrl.trim(), cover: editingVideoCoverIsCustom ? editingVideoCover : '', price: videoPrice }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'تعذر تعديل المحاضرة');
@@ -1547,6 +1947,7 @@ function App() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'تعذر حذف المحاضرة');
       setVideos(data.videos || []);
+      setDashboard((current) => current ? { ...current, lessons: data.lessons || current.lessons } : current);
       setSelectedVideo((current) => (current && current.id === videoId ? (data.videos[0] || null) : current));
       setVideoFormError('');
     } catch (err) {
@@ -1660,16 +2061,34 @@ function App() {
             </div>
 
             <div className="stage-grid">
-              {publicStages.map((stage) => (
-                <article key={stage.id} className="stage-card" data-reveal>
-                  <div className="stage-image" style={{ backgroundImage: `url('${stage.image}')` }}>
-                    <button type="button" className="stage-button" onClick={scrollToLogin}>
-                      استكشف المحتوى
-                    </button>
+              {publicStageUnits.map((stage) => (
+                <article
+                  key={stage.id}
+                  className="stage-card"
+                  data-reveal
+                  role="button"
+                  tabIndex={0}
+                  aria-label={stage.title}
+                  onClick={scrollToLogin}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      scrollToLogin();
+                    }
+                  }}
+                >
+                  <div className="stage-image" style={stage.image ? { backgroundImage: `url('${stage.image}')` } : undefined}>
+                    {stage.isNew && <span className="stage-new-badge">{'\u062c\u062f\u064a\u062f'}</span>}
                   </div>
                   <div className="stage-content">
+                    <span className="stage-level">{'\u0627\u0644\u0635\u0641 \u0627\u0644\u062b\u0627\u0646\u064a \u0627\u0644\u062b\u0627\u0646\u0648\u064a \u2022 \u0627\u0644\u0648\u062d\u062f\u0629'} {stage.unitId}</span>
                     <h3>{stage.title}</h3>
                     <p>{stage.subtitle}</p>
+                    <div className="stage-stats" aria-label={`${stage.lessonCount || 0} lectures, ${stage.quizCount || 0} quizzes`}>
+                      <span><strong>{stage.lessonCount || 0}</strong> {'\u0645\u062d\u0627\u0636\u0631\u0627\u062a'}</span>
+                      <span className="stage-stats-divider" aria-hidden="true" />
+                      <span><strong>{stage.quizCount || 0}</strong> {'\u0627\u062e\u062a\u0628\u0627\u0631\u0627\u062a'}</span>
+                    </div>
                   </div>
                 </article>
               ))}
@@ -1737,6 +2156,27 @@ function App() {
             </div>
           </section>
 
+          {publicQuizLeaders.length > 0 && <section className="section-block leaderboard-block">
+            <div className="section-heading">
+              <span className="eyebrow">{'\u0646\u062a\u0627\u0626\u062c \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631\u0627\u062a'}</span>
+              <h2>{'\u0627\u0644\u0637\u0644\u0627\u0628 \u0627\u0644\u0645\u062a\u0645\u064a\u0632\u0648\u0646'}</h2>
+              <p>{'\u062a\u0631\u062a\u064a\u0628 \u0627\u0644\u0637\u0644\u0627\u0628 \u062d\u0633\u0628 \u0623\u0641\u0636\u0644 \u0646\u0633\u0628\u0629 \u062d\u0642\u0642\u0648\u0647\u0627 \u0641\u064a \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631\u0627\u062a.'}</p>
+            </div>
+            <div className="leaderboard-list" role="list" aria-label={'\u0623\u0641\u0636\u0644 \u0646\u062a\u0627\u0626\u062c \u0627\u0644\u0637\u0644\u0627\u0628'}>
+              {publicQuizLeaders.map((student) => (
+                <article className={`leaderboard-card leaderboard-rank-${student.rank}`} key={`${student.rank}-${student.displayName}`} role="listitem">
+                  <span className="leaderboard-rank" aria-label={`${student.rank}`}>{student.rank === 1 ? '\u2605' : String(student.rank).padStart(2, '0')}</span>
+                  <div className="leaderboard-student-info">
+                    <strong>{student.displayName}</strong>
+                    <span>{student.quizTitle || '\u0627\u062e\u062a\u0628\u0627\u0631'}</span>
+                    <small>{student.attempts} {'\u0627\u062e\u062a\u0628\u0627\u0631\u0627\u062a \u0645\u062d\u0644\u0648\u0644\u0629'}</small>
+                  </div>
+                  <div className="leaderboard-score"><strong>{student.bestPercentage}%</strong><span>{student.score} / {student.total}</span></div>
+                </article>
+              ))}
+            </div>
+          </section>}
+
           <div className="code-gap code-gap-right" aria-hidden="true">
             <span className="code-float code-float-html"><span>HTML</span> &lt;build&gt;your future&lt;/build&gt;</span>
           </div>
@@ -1748,11 +2188,39 @@ function App() {
             </div>
 
             <div className="about-box">
-              <p>
-                منصة تعليمية تساعد طالب الصف الثاني الثانوي بنظام البكالوريا على فهم البرمجة والذكاء الاصطناعي
-                من خلال محاضرات تفاعلية، تطبيقات عملية واختبارات دورية باللغة العربية.
-                ملفات شرح المحاضرات والاختبارات متاحة بعد تسجيل الدخول.
-              </p>
+              <div className="about-layout">
+                <div className="about-copy">
+                  <span className="about-kicker">تعلم يناسب رحلتك الدراسية</span>
+                  <h3>من الفهم إلى التطبيق</h3>
+                  <p>
+                    منصة تعليمية تساعد طالب الصف الثاني الثانوي بنظام البكالوريا على فهم البرمجة والذكاء الاصطناعي
+                    من خلال محاضرات تفاعلية، تطبيقات عملية واختبارات دورية باللغة العربية.
+                  </p>
+                  <div className="about-login-note">
+                    <span aria-hidden="true">↗</span>
+                    ملفات شرح المحاضرات والاختبارات متاحة بعد تسجيل الدخول.
+                  </div>
+                </div>
+                <div className="about-visual" aria-hidden="true">
+                  <div className="about-visual-glow" />
+                  <div className="about-code-window">
+                    <div className="about-code-top"><span /><span /><span /><b>مساحة التعلم</b></div>
+                    <div className="about-code-lines" aria-hidden="true">
+                      <i><em>01</em><span className="code-purple">فهم</span><span className="code-muted">المفاهيم</span></i>
+                      <i><em>02</em><span className="code-cyan">تطبيق</span><span className="code-muted">عملي</span></i>
+                      <i><em>03</em><span className="code-green">تقييم</span><span className="code-muted">مستمر</span></i>
+                    </div>
+                    <div className="about-progress"><span /><b>رحلتك تبدأ هنا</b></div>
+                  </div>
+                  <span className="about-float-chip about-chip-video"><b>▶</b> محاضرات تفاعلية</span>
+                  <span className="about-float-chip about-chip-ai"><b>✦</b> برمجة وذكاء اصطناعي</span>
+                </div>
+              </div>
+              <div className="about-feature-row">
+                <div><span className="about-feature-icon">01</span><span><strong>شرح باللغة العربية</strong><small>محتوى مناسب للمنهج الدراسي</small></span></div>
+                <div><span className="about-feature-icon">02</span><span><strong>تطبيقات عملية</strong><small>تعلم بالممارسة خطوة بخطوة</small></span></div>
+                <div><span className="about-feature-icon">03</span><span><strong>اختبارات دورية</strong><small>راجع فهمك للمحتوى</small></span></div>
+              </div>
             </div>
           </section>
 
@@ -1765,23 +2233,26 @@ function App() {
               <span className="eyebrow">تواصل معانا</span>
               <h2>تابعنا على منصات التواصل</h2>
             </div>
-            <div className="contact-links">
+            <div className="contact-layout">
+              <a className="contact-whatsapp-card" href="https://wa.me/201112004658" target="_blank" rel="noreferrer">
+                <span className="contact-whatsapp-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12.04 2a9.86 9.86 0 0 0-8.45 14.94L2.3 21.7l4.88-1.28A9.86 9.86 0 1 0 12.04 2Zm0 17.92a8.03 8.03 0 0 1-4.1-1.13l-.3-.18-2.9.76.77-2.83-.2-.31a8.04 8.04 0 1 1 6.73 3.69Zm4.42-6.02c-.24-.12-1.42-.7-1.64-.78-.22-.08-.38-.12-.54.12-.16.24-.62.78-.76.94-.14.16-.28.18-.52.06-.24-.12-1.01-.37-1.93-1.19-.72-.64-1.2-1.43-1.34-1.67-.14-.24-.02-.37.1-.49.11-.11.24-.28.36-.42.12-.14.16-.24.24-.4.08-.16.04-.3-.02-.42-.06-.12-.54-1.3-.74-1.78-.19-.47-.39-.4-.54-.41h-.46c-.16 0-.42.06-.64.3-.22.24-.84.82-.84 2s.86 2.31.98 2.47c.12.16 1.69 2.58 4.09 3.62.57.25 1.02.39 1.37.5.58.18 1.1.15 1.51.09.46-.07 1.42-.58 1.62-1.14.2-.56.2-1.04.14-1.14-.06-.1-.22-.16-.46-.28Z" /></svg></span>
+                <span className="contact-whatsapp-copy"><small>تواصل مباشر</small><strong>راسلنا على واتساب</strong><span>يسعدنا الرد على استفسارك</span></span>
+                <span className="contact-whatsapp-arrow" aria-hidden="true">↗</span>
+              </a>
+              <div className="contact-links">
               <a className="contact-link facebook-link" href="https://www.facebook.com/profile.php?id=61594436055477" target="_blank" rel="noreferrer">
                 <span className="contact-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13.6 21v-8h2.7l.4-3.1h-3.1V8c0-.9.3-1.6 1.6-1.6h1.7V3.6c-.3 0-1.3-.1-2.5-.1-2.5 0-4.2 1.5-4.2 4.3v2.1H7.4V13h2.8v8h3.4z" /></svg></span>
-                <span>فيسبوك</span>
+                <span className="contact-link-copy"><strong>فيسبوك</strong><small>تابع صفحة المنصة</small></span>
               </a>
               <a className="contact-link tiktok-link" href="https://www.tiktok.com/@eng_mohamedabdelshafy" target="_blank" rel="noreferrer">
                 <span className="contact-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M19.6 7.1a7.5 7.5 0 0 1-4.5-1.5v7.2a6.1 6.1 0 1 1-5.1-6v3.7a2.5 2.5 0 1 0 1.6 2.3V2h3.6a4.6 4.6 0 0 0 4.4 4.4v.7z" /></svg></span>
-                <span>تيك توك</span>
+                <span className="contact-link-copy"><strong>تيك توك</strong><small>تابع حساب المنصة</small></span>
               </a>
               <a className="contact-link youtube-link" href="https://www.youtube.com/@eng-mohamed-abdelshafy" target="_blank" rel="noreferrer">
                 <span className="contact-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.6 3.6 12 3.6 12 3.6s-7.6 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.8.5 9.4.5 9.4.5s7.6 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.2 3.6-6.2 3.6Z" /></svg></span>
-                <span>يوتيوب</span>
+                <span className="contact-link-copy"><strong>يوتيوب</strong><small>تابع قناة المنصة</small></span>
               </a>
-              <a className="contact-link whatsapp-link" href="https://wa.me/201112004658" target="_blank" rel="noreferrer">
-                <span className="contact-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12.04 2a9.86 9.86 0 0 0-8.45 14.94L2.3 21.7l4.88-1.28A9.86 9.86 0 1 0 12.04 2Zm0 17.92a8.03 8.03 0 0 1-4.1-1.13l-.3-.18-2.9.76.77-2.83-.2-.31a8.04 8.04 0 1 1 6.73 3.69Zm4.42-6.02c-.24-.12-1.42-.7-1.64-.78-.22-.08-.38-.12-.54.12-.16.24-.62.78-.76.94-.14.16-.28.18-.52.06-.24-.12-1.01-.37-1.93-1.19-.72-.64-1.2-1.43-1.34-1.67-.14-.24-.02-.37.1-.49.11-.11.24-.28.36-.42.12-.14.16-.24.24-.4.08-.16.04-.3-.02-.42-.06-.12-.54-1.3-.74-1.78-.19-.47-.39-.4-.54-.41h-.46c-.16 0-.42.06-.64.3-.22.24-.84.82-.84 2s.86 2.31.98 2.47c.12.16 1.69 2.58 4.09 3.62.57.25 1.02.39 1.37.5.58.18 1.1.15 1.51.09.46-.07 1.42-.58 1.62-1.14.2-.56.2-1.04.14-1.14-.06-.1-.22-.16-.46-.28Z" /></svg></span>
-                <span>واتساب</span>
-              </a>
+              </div>
             </div>
           </section>
 
@@ -1863,6 +2334,7 @@ function App() {
             </form>
             </div>
           </div>}
+
         </main>
       </div>
     );
@@ -1882,18 +2354,43 @@ function App() {
       : secondSecondaryUnits.map((unit) => ({ grade: user.grade || 'second-secondary', term: '', unitId: unit.id, packagePrice: 0 }));
     const studentPackages = packageDefinitions.reduce((packages, definition) => {
       const key = `${definition.grade}:${definition.term || 'all'}:${definition.unitId}`;
-      packages[key] = { packageKey: key, grade: definition.grade, term: definition.term, unitId: definition.unitId, packagePrice: definition.packagePrice, videos: [], quizzes: [], purchased: false };
+      packages[key] = { packageKey: key, grade: definition.grade, term: definition.term, unitId: definition.unitId, packagePrice: definition.packagePrice, videos: [], lessons: [], quizzes: [], purchased: false };
       return packages;
     }, {});
 
     [...videos.map((video) => ({ ...video, contentType: 'video' })), ...(dashboard?.quizzes || []).map((quiz) => ({ ...quiz, contentType: 'quiz' }))].reduce((packages, item) => {
       const key = item.packageKey || `${item.grade || user.grade}:${item.term || user.term || 'all'}:${item.unitId || 1}`;
-      if (!packages[key]) packages[key] = { packageKey: key, grade: item.grade || user.grade, term: item.term || user.term || '', unitId: item.unitId || 1, packagePrice: item.packagePrice || 0, videos: [], quizzes: [], purchased: Boolean(item.purchased || item.packagePurchased) };
+      if (!packages[key]) packages[key] = { packageKey: key, grade: item.grade || user.grade, term: item.term || user.term || '', unitId: item.unitId || 1, packagePrice: item.packagePrice || 0, videos: [], lessons: [], quizzes: [], purchased: Boolean(item.purchased || item.packagePurchased) };
       packages[key][item.contentType === 'video' ? 'videos' : 'quizzes'].push(item);
       packages[key].purchased = packages[key].purchased || Boolean(item.purchased || item.packagePurchased);
       packages[key].packagePrice = packages[key].packagePrice || Number(item.packagePrice || 0);
       return packages;
     }, studentPackages);
+
+    Object.values(studentPackages).forEach((contentPackage) => {
+      const lessonMap = new Map();
+      contentPackage.videos.forEach((video) => {
+        const lessonId = Number(video.lessonId || video.id);
+        if (!lessonMap.has(lessonId)) {
+          const metadata = dashboard?.lessons?.find((lesson) => Number(lesson.id) === lessonId);
+          lessonMap.set(lessonId, {
+            id: lessonId,
+            title: metadata?.title || video.title,
+            createdAt: metadata?.createdAt || video.createdAt,
+            videos: [],
+            pdfs: metadata?.pdfs || [],
+          });
+        }
+        lessonMap.get(lessonId).videos.push(video);
+      });
+      contentPackage.lessons = [...lessonMap.values()]
+        .map((lesson) => ({
+          ...lesson,
+          videos: lesson.videos.sort((left, right) => new Date(left.createdAt || 0) - new Date(right.createdAt || 0) || left.id - right.id),
+          resources: getOrderedLessonResources(lesson),
+        }))
+        .sort((left, right) => new Date(left.createdAt || 0) - new Date(right.createdAt || 0) || left.id - right.id);
+    });
 
     const orderedStudentPackages = Object.values(studentPackages).sort((left, right) => {
       if (left.grade !== right.grade) return left.grade === 'first-secondary' ? -1 : 1;
@@ -1901,7 +2398,7 @@ function App() {
       return Number(left.unitId) - Number(right.unitId);
     });
     const unitsWithContent = orderedStudentPackages.filter((contentPackage) => contentPackage.videos.length || contentPackage.quizzes.length);
-    const totalStudentLessons = orderedStudentPackages.reduce((total, contentPackage) => total + contentPackage.videos.length, 0);
+    const totalStudentLessons = orderedStudentPackages.reduce((total, contentPackage) => total + contentPackage.lessons.length, 0);
     const totalStudentQuizzes = orderedStudentPackages.reduce((total, contentPackage) => total + contentPackage.quizzes.length, 0);
 
     if (selectedQuiz) {
@@ -1922,21 +2419,24 @@ function App() {
                 return (
                   <fieldset key={question.id} className={`quiz-full-question ${correction ? correction.isCorrect ? 'answer-correct' : 'answer-wrong' : ''}`}>
                     <legend>{index + 1}. {question.text}</legend>
-                    <div className="quiz-full-options">
+                    {question.type === 'essay' ? <label className="essay-answer-field">
+                      <span>اكتب إجابتك هنا <small>({question.points || 1} درجات)</small></span>
+                      <textarea value={quizAnswers[index] || ''} onChange={(event) => setQuizAnswers((current) => { const next = [...current]; next[index] = event.target.value; return next; })} rows="5" disabled={Boolean(quizResult)} required placeholder="اكتب إجابتك بشكل واضح..." />
+                    </label> : <div className="quiz-full-options">
                       {question.options.map((option, optionIndex) => (
                         <label key={`${question.id}-${optionIndex}`} className={correction && correction.correctOption === optionIndex ? 'correct-option' : ''}>
                           <input type="radio" name={`question-${question.id}`} checked={Number(quizAnswers[index]) === optionIndex} onChange={() => setQuizAnswers((current) => { const next = [...current]; next[index] = optionIndex; return next; })} disabled={Boolean(quizResult)} required />
                           <span>{option}</span>
                         </label>
                       ))}
-                    </div>
-                    {correction && <div className={correction.isCorrect ? 'answer-feedback correct-feedback' : 'answer-feedback wrong-feedback'}>
+                    </div>}
+                    {correction && question.type !== 'essay' && <div className={correction.isCorrect ? 'answer-feedback correct-feedback' : 'answer-feedback wrong-feedback'}>
                       {correction.isCorrect ? 'إجابة صحيحة' : `إجابة غير صحيحة. الإجابة الصحيحة: ${correction.correctAnswer}`}
                     </div>}
                   </fieldset>
                 );
               })}
-              {!quizResult ? <button type="submit" className="primary-btn quiz-finish-btn">إنهاء الاختبار وتصحيح الإجابات</button> : <div className="quiz-final-result">نتيجتك: {quizResult.score} من {quizResult.total} ({Math.round((quizResult.score / quizResult.total) * 100)}%)</div>}
+              {!quizResult ? <button type="submit" className="primary-btn quiz-finish-btn">إنهاء الاختبار وإرسال الإجابات</button> : <div className="quiz-final-result">{quizResult.pendingEssayCount ? `تم استلام إجاباتك. درجتك الحالية ${quizResult.score} من ${quizResult.total}، وستظهر الدرجة النهائية بعد مراجعة الأسئلة المقالية.` : `نتيجتك: ${quizResult.score} من ${quizResult.total} (${Math.round((quizResult.score / quizResult.total) * 100)}%)`}</div>}
             </form>
           </main>
         </div>
@@ -1944,9 +2444,9 @@ function App() {
     }
 
     const selectedPackage = Object.values(studentPackages).find((contentPackage) => contentPackage.packageKey === selectedPackageKey);
-    const selectedLesson = selectedPackage?.videos.find((video) => String(video.id) === String(selectedLessonVideoId));
+    const selectedLesson = selectedPackage?.lessons.find((lesson) => String(lesson.id) === String(selectedLessonVideoId));
     if (selectedPackage && selectedLesson) {
-      const lessonIndex = selectedPackage.videos.findIndex((video) => String(video.id) === String(selectedLesson.id));
+      const lessonIndex = selectedPackage.lessons.findIndex((lesson) => String(lesson.id) === String(selectedLesson.id));
       const lessonQuizzes = selectedPackage.quizzes.filter((quiz) => String(quiz.lessonId || '') === String(selectedLesson.id));
       const unitTitle = selectedPackage.grade === 'first-secondary'
         ? selectedPackage.term === 'first-term' ? 'أولى ثانوي - الترم الأول' : 'أولى ثانوي - الترم الثاني'
@@ -1969,43 +2469,57 @@ function App() {
           </header>
 
           <main className="unit-detail-main lesson-detail-main">
-            {selectedLesson.lessonPdfAvailable && <section className="unit-lesson-resource">
-              <div className="unit-resource-heading">
-                <div><span className="unit-resource-type">ملف شرح المحاضرة</span><h4>{selectedLesson.title}</h4></div>
-                <button type="button" className="secondary-btn" onClick={() => openLessonPdf(selectedLesson)} disabled={lessonPdfLoading === selectedLesson.id}>
-                  {lessonPdfLoading === selectedLesson.id ? 'جاري فتح الملف...' : lessonPdfVideoId === selectedLesson.id ? 'إغلاق الملف' : 'عرض ملف PDF'}
-                </button>
-              </div>
-              {lessonPdfVideoId === selectedLesson.id && lessonPdfUrl && <iframe className="lesson-pdf-frame" src={`${lessonPdfUrl}#toolbar=0`} title={`ملف PDF: ${selectedLesson.title}`} />}
-            </section>}
-
-            {selectedLesson.url && <section className="unit-lesson-resource">
-              <div className="unit-resource-heading">
-                <div><span className="unit-resource-type">شرح مرئي للمحاضرة</span><h4>{selectedLesson.title}</h4></div>
-              </div>
-              {playingLessonVideoId === selectedLesson.id ? (
-                <>
-                  <div className="lesson-video-frame-wrap">
-                    <iframe
-                      className="lesson-video-frame"
-                      src={selectedLesson.url}
-                      title={`شرح المحاضرة: ${selectedLesson.title}`}
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      referrerPolicy="strict-origin-when-cross-origin"
-                      allowFullScreen
-                    />
-                    <div className="video-watermark" aria-hidden="true">{user.email} • {user.name}</div>
-                  </div>
-                  <button type="button" className="secondary-btn lesson-video-stop" onClick={() => playLessonVideo(selectedLesson)}>إيقاف الشرح</button>
-                </>
-              ) : (
-                <button type="button" className="lesson-video-cover" onClick={() => playLessonVideo(selectedLesson)} aria-label={`تشغيل شرح المحاضرة: ${selectedLesson.title}`}>
-                  {selectedLesson.cover ? <img src={selectedLesson.cover} alt="" /> : <span className="lesson-video-cover-placeholder" aria-hidden="true">▶</span>}
-                  <span className="lesson-video-cover-play" aria-hidden="true">▶</span>
-                  <span className="lesson-video-cover-caption">اضغط لتشغيل الشرح</span>
-                </button>
-              )}
-            </section>}
+            {getOrderedLessonResources(selectedLesson).map((resource) => resource.type === 'pdf' ? (
+              <section className="unit-lesson-resource" key={`pdf-${resource.id}`}>
+                <div className="unit-resource-heading">
+                  <div><span className="unit-resource-type">ملف شرح PDF {selectedLesson.pdfs.length > 1 ? `${selectedLesson.pdfs.findIndex((pdf) => pdf.id === resource.id) + 1}` : ''}</span><h4>{resource.pdf.name}</h4></div>
+                  <button type="button" className="secondary-btn" onClick={() => openLessonPdfResource(selectedLesson.id, resource.pdf)} disabled={lessonPdfLoading === resource.id}>
+                    {lessonPdfLoading === resource.id ? 'جاري فتح الملف...' : lessonPdfVideoId === resource.id ? 'إغلاق الملف' : 'عرض ملف PDF'}
+                  </button>
+                </div>
+                {lessonPdfVideoId === resource.id && lessonPdfUrl && <iframe className="lesson-pdf-frame" src={`${lessonPdfUrl}#toolbar=0`} title={`ملف PDF: ${resource.pdf.name}`} />}
+              </section>
+            ) : (
+              <section className="unit-lesson-resource" key={`video-${resource.id}`}>
+                <div className="unit-resource-heading">
+                  <div><span className="unit-resource-type">شرح مرئي {selectedLesson.videos.length > 1 ? `${selectedLesson.videos.findIndex((video) => video.id === resource.id) + 1}` : ''}</span><h4>{resource.video.title}</h4></div>
+                </div>
+                {resource.video.url && (playingLessonVideoId === resource.id ? (
+                  <>
+                    <div className="lesson-video-frame-wrap">
+                      {/\.(mp4|webm|ogg)(?:$|[?#])/i.test(resource.video.url) ? <video
+                        className="lesson-video-frame lesson-video-native"
+                        src={getPlayableVideoUrl(resource.video.url)}
+                        title={`شرح المحاضرة: ${resource.video.title}`}
+                        controls
+                        playsInline
+                        onError={() => setVideoPlaybackError({ id: resource.id, message: 'تعذر تحميل ملف الفيديو. تحقق من رابط الملف وإتاحته.' })}
+                      /> : <iframe
+                          className="lesson-video-frame"
+                          src={getPlayableVideoUrl(resource.video.url)}
+                          title={`شرح المحاضرة: ${resource.video.title}`}
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                          referrerPolicy="strict-origin-when-cross-origin"
+                          allowFullScreen
+                        />}
+                      <div className="video-watermark" aria-hidden="true">{user.email} • {user.name}</div>
+                    </div>
+                    <div className="lesson-video-actions">
+                      <button type="button" className="secondary-btn lesson-video-stop" onClick={() => playLessonVideo(resource.video)}>إيقاف الشرح</button>
+                      <a className="lesson-video-direct-link" href={getDirectVideoPageUrl(resource.video.url)} target="_blank" rel="noreferrer">فتح الفيديو مباشرةً <span aria-hidden="true">↗</span></a>
+                    </div>
+                  </>
+                ) : (
+                  <button type="button" className="lesson-video-cover" onClick={() => playLessonVideo(resource.video)} aria-label={`تشغيل شرح المحاضرة: ${resource.video.title}`}>
+                    {resource.video.cover ? <img src={resource.video.cover} alt="" /> : <span className="lesson-video-cover-placeholder" aria-hidden="true">▶</span>}
+                    <span className="lesson-video-cover-play" aria-hidden="true">▶</span>
+                    <span className="lesson-video-cover-caption">اضغط لتشغيل الشرح</span>
+                  </button>
+                ))}
+                {videoPlaybackError?.id === resource.id && <div className="lesson-video-error" role="alert">{videoPlaybackError.message}<small>إذا استمر التعذر، راجع رابط التضمين وإعدادات إتاحة الفيديو لدى مزود الخدمة.</small></div>}
+                {!resource.video.url && <span className="lesson-pdf-status">هذا الفيديو مقفول؛ افتح محتوى الوحدة لمشاهدته.</span>}
+              </section>
+            ))}
 
             {lessonQuizzes.length > 0 && <section className="unit-quizzes-section">
               <div className="section-heading">
@@ -2049,7 +2563,7 @@ function App() {
             <div className="unit-detail-heading">
               <span className="eyebrow">محتوى الوحدة</span>
               <h1>{unitTitle}</h1>
-              <p>{selectedPackage.videos.length} محاضرة و{selectedPackage.quizzes.length} اختبار</p>
+              <p>{selectedPackage.lessons.length} محاضرة و{selectedPackage.quizzes.length} اختبار</p>
             </div>
           </header>
 
@@ -2065,28 +2579,28 @@ function App() {
             </section>}
 
             {packageUnlocked && <>
-              {selectedPackage.videos.length > 0 && <section className="unit-lessons-section">
+              {selectedPackage.lessons.length > 0 && <section className="unit-lessons-section">
                 <div className="section-heading">
                   <span className="eyebrow">محاضرات الوحدة</span>
                   <h2>المحاضرات</h2>
                 </div>
                 <div className="unit-lesson-list">
-                  {selectedPackage.videos.map((video, index) => (
-                    <article className="unit-lesson-card" key={video.id}>
-                      <button type="button" className="unit-lesson-link" onClick={() => { setSelectedLessonVideoId(video.id); setPlayingLessonVideoId(null); closeLessonPdf(); }}>
+                  {selectedPackage.lessons.map((lesson, index) => (
+                    <article className="unit-lesson-card" key={lesson.id}>
+                      <button type="button" className="unit-lesson-link" onClick={() => { setSelectedLessonVideoId(lesson.id); setPlayingLessonVideoId(null); closeLessonPdf(); }}>
                         <span className="unit-lesson-thumbnail">
-                          {video.cover ? <img src={video.cover} alt="" /> : <span className="unit-lesson-thumbnail-placeholder" aria-hidden="true">▶</span>}
+                          {lesson.videos[0]?.cover ? <img src={lesson.videos[0].cover} alt="" /> : <span className="unit-lesson-thumbnail-placeholder" aria-hidden="true">▶</span>}
                           <span className="unit-lesson-thumbnail-shade" aria-hidden="true" />
                           <span className="unit-lesson-thumbnail-number">محاضرة {String(index + 1).padStart(2, '0')}</span>
                           <span className="unit-lesson-thumbnail-play" aria-hidden="true">▶</span>
                         </span>
                         <span className="unit-lesson-link-copy">
                           <span className="eyebrow">المحاضرة {index + 1}</span>
-                          <strong>{video.title}</strong>
+                          <strong>{lesson.title}</strong>
                           <span className="unit-lesson-resources">
-                            {video.lessonPdfAvailable && <span>PDF شرح</span>}
-                            {video.url && <span>شرح مرئي</span>}
-                            {selectedPackage.quizzes.some((quiz) => String(quiz.lessonId || '') === String(video.id)) && <span>اختبار</span>}
+                            {lesson.pdfs.length > 0 && <span>{lesson.pdfs.length} PDF</span>}
+                            {lesson.videos.length > 0 && <span>{lesson.videos.length} فيديو شرح</span>}
+                            {selectedPackage.quizzes.some((quiz) => String(quiz.lessonId || '') === String(lesson.id)) && <span>اختبار</span>}
                           </span>
                         </span>
                         <span className="unit-lesson-open-label">فتح المحاضرة <span aria-hidden="true">←</span></span>
@@ -2115,6 +2629,25 @@ function App() {
               </section>}
             </>}
           </main>
+          {paymentOpen && <div className="payment-modal-backdrop" onClick={() => setPaymentOpen(false)}>
+            <section className="payment-modal" onClick={(event) => event.stopPropagation()}>
+              <button type="button" className="modal-close" onClick={() => setPaymentOpen(false)}>×</button>
+              <span className="eyebrow">شحن رصيد الطالب</span>
+              <h2>الدفع عبر Vodafone Cash</h2>
+              {paymentNotice && <p className="payment-notice" role="status">{paymentNotice}</p>}
+              <div className="payment-account-summary"><strong>{user?.name}</strong><span>{user?.email}</span><span>رقم الطالب: {user?.studentNumber || 'مسجل بالحساب'}</span></div>
+              <div className="vodafone-number"><span>حوّل إلى الرقم</span><strong>{paymentSettings?.vodafoneCashNumber || 'جارٍ تحميل رقم الدفع...'}</strong></div>
+              {paymentSettings?.instructions && <p className="payment-instructions">{paymentSettings.instructions}</p>}
+              <form className="recharge-form" onSubmit={submitRechargeRequest}>
+                <label className="management-field">المبلغ بالجنيه المصري<input type="number" min={paymentSettings?.minimumAmount || 10} value={rechargeAmount} onChange={(event) => setRechargeAmount(event.target.value)} placeholder="مثال: 100" required /></label>
+                <label className="management-field">رقم الهاتف المحوّل منه<input type="tel" value={senderPhone} onChange={(event) => setSenderPhone(event.target.value)} placeholder="اختياري" /></label>
+                <label className="management-field">ملاحظات<input value={rechargeNotes} onChange={(event) => setRechargeNotes(event.target.value)} placeholder="اختياري" /></label>
+                {rechargeMessage && <div className="message">{rechargeMessage}</div>}
+                <button type="submit" className="primary-btn">إرسال طلب الشحن</button>
+              </form>
+              <div className="recharge-history"><h3>طلبات الشحن السابقة</h3>{rechargeRequests.map((request) => <div key={request.id}><strong>مبلغ التحويل: <CurrencyAmount amount={request.amount} /></strong><span>{request.status === 'Pending' ? 'قيد المراجعة' : request.status === 'Approved' ? 'تم الاعتماد' : 'مرفوض'}</span></div>)}{!rechargeRequests.length && <p>لا توجد طلبات سابقة.</p>}</div>
+            </section>
+          </div>}
         </div>
       );
     }
@@ -2139,15 +2672,19 @@ function App() {
 
         <section className="student-overview" aria-label="ملخص المحتوى الدراسي">
           <div className="student-overview-copy">
-            <span className="eyebrow">محتواك الدراسي</span>
-            <h2>ابدأ من وحدتك</h2>
-            <p>المحاضرات وملفاتها واختباراتها مرتبة داخل كل وحدة.</p>
+            <span className="student-hero-kicker"><span className="student-hero-kicker-dot" /> رحلتك التعليمية تبدأ هنا</span>
+            <h2>كل خطوة تقرّبك من هدفك</h2>
+            <p>محاضراتك وملفاتك واختباراتك منظمة في مكان واحد. اختر وحدتك وابدأ التعلّم بالوتيرة المناسبة لك.</p>
+            <button type="button" className="student-hero-cta" onClick={() => document.getElementById('student-units')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+              استكشف وحداتك <span aria-hidden="true">←</span>
+            </button>
           </div>
           <div className="student-overview-stats">
-            <div><strong>{unitsWithContent.length}</strong><span>وحدة متاحة</span></div>
-            <div><strong>{totalStudentLessons}</strong><span>محاضرة</span></div>
-            <div><strong>{totalStudentQuizzes}</strong><span>اختبار</span></div>
+            <div><span className="student-stat-icon">◈</span><strong>{unitsWithContent.length}</strong><span>وحدة متاحة</span></div>
+            <div><span className="student-stat-icon">▤</span><strong>{totalStudentLessons}</strong><span>محاضرة</span></div>
+            <div><span className="student-stat-icon">✓</span><strong>{totalStudentQuizzes}</strong><span>اختبار</span></div>
           </div>
+          <div className="student-hero-art" aria-hidden="true"><span className="student-hero-orbit orbit-one" /><span className="student-hero-orbit orbit-two" /><span className="student-hero-book">✦</span><span className="student-hero-spark spark-one">✧</span><span className="student-hero-spark spark-two">✦</span><span className="student-hero-caption">تعلّم • تطوّر • تميّز</span></div>
         </section>
 
         {profileOpen && <div className="profile-modal-backdrop" onClick={() => setProfileOpen(false)}>
@@ -2199,7 +2736,7 @@ function App() {
             <p>{dashboard?.balance > 0 ? 'لديك رصيد يمكنك استخدامه لشراء المحاضرات والاختبارات' : 'اشحن رصيدك لشراء المحاضرات والاختبارات'}</p>
           </div>
 
-          <button onClick={openPaymentPage} className="pay-btn" disabled={loading}>
+          <button type="button" onClick={() => openPaymentPage()} className="pay-btn" disabled={loading}>
             {loading ? 'جاري التحميل...' : 'شحن الرصيد'}
           </button>
         </div>
@@ -2209,6 +2746,7 @@ function App() {
             <button type="button" className="modal-close" onClick={() => setPaymentOpen(false)}>×</button>
             <span className="eyebrow">شحن رصيد الطالب</span>
             <h2>الدفع عبر Vodafone Cash</h2>
+            {paymentNotice && <p className="payment-notice" role="status">{paymentNotice}</p>}
             <div className="payment-account-summary"><strong>{user?.name}</strong><span>{user?.email}</span><span>رقم الطالب: {user?.studentNumber || 'مسجل بالحساب'}</span></div>
             <div className="vodafone-number"><span>حوّل إلى الرقم</span><strong>{paymentSettings?.vodafoneCashNumber}</strong></div>
             <p className="payment-instructions">{paymentSettings?.instructions}</p>
@@ -2225,16 +2763,17 @@ function App() {
 
         {error && <div className="error-box">{error}</div>}
 
-        {unitsWithContent.length > 0 && <section className="student-packages">
+        {unitsWithContent.length > 0 && <section className="student-packages" id="student-units">
           <div className="student-units-heading">
             <div className="section-heading">
-              <span className="eyebrow">خريطة المنهج</span>
+              <span className="eyebrow">مسارك الدراسي</span>
               <h2>وحداتك الدراسية</h2>
+              <p>محتوى كل وحدة ومحاضراتها واختباراتها في مكان واحد.</p>
             </div>
-            <span className="student-unit-count">{unitsWithContent.length} وحدات</span>
+            <span className="student-unit-count"><span aria-hidden="true">▦</span> {unitsWithContent.length} وحدات متاحة</span>
           </div>
           <div className="package-grid">
-            {unitsWithContent.map((contentPackage) => {
+            {unitsWithContent.map((contentPackage, index) => {
               const packageCover = contentPackage.videos.find((video) => video.cover)?.cover;
               return <article key={contentPackage.packageKey} className="package-card">
                 <span className="package-price">{contentPackage.packagePrice > 0 ? <CurrencyAmount amount={contentPackage.packagePrice} /> : 'السعر قريبًا'}</span>
@@ -2244,15 +2783,17 @@ function App() {
                   onClick={() => setSelectedPackageKey(contentPackage.packageKey)}
                 >
                   <span className="package-summary-cover" style={packageCover ? { backgroundImage: `linear-gradient(0deg, rgba(8, 18, 29, 0.34), rgba(8, 18, 29, 0.08)), url('${packageCover}')` } : undefined}>
+                    <span className="package-unit-index">{String(index + 1).padStart(2, '0')}</span>
                     <span className="package-summary-play" aria-hidden="true">▶</span>
                   </span>
                   <span className="package-summary-info">
                     <span className="package-summary-title">
                       <span className="eyebrow">{contentPackage.grade === 'first-secondary' ? contentPackage.term === 'first-term' ? 'الصف الأول الثانوي • الترم الأول' : 'الصف الأول الثانوي • الترم الثاني' : `الصف الثاني الثانوي • الوحدة ${contentPackage.unitId}`}</span>
-                      <strong>{contentPackage.videos[0]?.title || 'محتوى الوحدة'}</strong>
+                      <span className="package-lesson-label">أول محاضرة في الوحدة</span>
+                      <strong>{contentPackage.lessons[0]?.title || 'محتوى الوحدة'}</strong>
                     </span>
                     <span className="package-summary-footer">
-                      <span className="package-summary-count">{contentPackage.videos.length} محاضرة • {contentPackage.quizzes.length} اختبار</span>
+                      <span className="package-summary-count"><span><b aria-hidden="true">▤</b> {contentPackage.lessons.length} محاضرة</span><span><b aria-hidden="true">✓</b> {contentPackage.quizzes.length} اختبار</span></span>
                       <span className="package-open-label">فتح الوحدة <span aria-hidden="true">←</span></span>
                     </span>
                   </span>
@@ -2321,7 +2862,7 @@ function App() {
         <div className="logo">مهندس محمد عبد الشافي</div>
         <nav>
           <button type="button" className={`nav-item ${adminSection === 'overview' ? 'active' : ''}`} onClick={() => setAdminSection('overview')}>نظرة عامة</button>
-          <button type="button" className={`nav-item ${adminSection === 'videos' ? 'active' : ''}`} onClick={() => setAdminSection('videos')}>المحاضرات</button>
+          <button type="button" className={`nav-item ${adminSection === 'videos' ? 'active' : ''}`} onClick={() => { setAdminSection('videos'); setLectureManagementView('list'); }}>المحاضرات</button>
           <button type="button" className={`nav-item ${adminSection === 'lesson-files' ? 'active' : ''}`} onClick={() => setAdminSection('lesson-files')}>ملفات الشرح</button>
           <button type="button" className={`nav-item ${adminSection === 'students' ? 'active' : ''}`} onClick={() => setAdminSection('students')}>الطلاب</button>
           <button type="button" className={`nav-item ${adminSection === 'payments' ? 'active' : ''}`} onClick={() => { setAdminSection('payments'); loadPaymentRequests(); }}>طلبات الدفع</button>
@@ -2388,6 +2929,46 @@ function App() {
             {adminSection === 'question-bank' && <section className="question-bank-section">
               <div className="section-heading"><span className="eyebrow">اختبارات تفاعلية</span><h2>بنك الأسئلة</h2></div>
 
+              {quizList.length ? <form className="essay-question-card question-bank-essay-form" onSubmit={addEssayQuestion}>
+                <div className="essay-question-heading"><span aria-hidden="true">✍️</span><div><h3>إضافة سؤال مقالي</h3><p>اختر اختبارًا موجودًا أولًا، ثم اكتب السؤال وحدد درجته. الإجابة النموذجية اختيارية وتظهر للمدرس فقط.</p></div></div>
+                <label className="management-field">إضافة السؤال إلى الاختبار
+                  <select value={selectedAdminQuiz ? String(selectedAdminQuiz.id) : ''} onChange={(event) => {
+                    const quiz = quizList.find((item) => String(item.id) === event.target.value);
+                    if (quiz) {
+                      setSelectedAdminQuizId(String(quiz.id));
+                      startEditQuiz(quiz);
+                    }
+                  }}>
+                    {quizList.map((quiz) => <option key={quiz.id} value={String(quiz.id)}>{quiz.title}</option>)}
+                  </select>
+                </label>
+                <label className="management-field">نص السؤال<textarea value={essayQuestionText} onChange={(event) => setEssayQuestionText(event.target.value)} rows="3" required placeholder="مثال: اشرح الفكرة الرئيسية للدرس..." /></label>
+                <label className="management-field">الإجابة النموذجية أو ملاحظات التصحيح <small>للمدرس فقط</small><textarea value={essayModelAnswer} onChange={(event) => setEssayModelAnswer(event.target.value)} rows="3" placeholder="اختياري — لن تظهر للطلاب" /></label>
+                <label className="management-field essay-points-field">درجة السؤال<input type="number" min="0.1" max="100" step="0.1" value={essayPoints} onChange={(event) => setEssayPoints(event.target.value)} required /></label>
+                <button type="submit" className="primary-btn">إضافة السؤال إلى الاختبار</button>
+              </form> : <div className="essay-question-card essay-question-empty"><strong>لإضافة سؤال لاختبار موجود، يجب إنشاء الاختبار أولًا</strong><span>يمكنك إنشاء اختبار من PDF أسفل الصفحة، أو إنشاء اختبار مقالي جديد سؤالًا بسؤال من الاختيار التالي.</span></div>}
+
+              <div className="standalone-essay-builder essay-question-card">
+                <div className="essay-question-heading"><span aria-hidden="true">📝</span><div><h3>إنشاء اختبار مقالي سؤالًا بسؤال</h3><p>أضف بيانات الاختبار، ثم أضف كل سؤال إلى المسودة واحفظ الاختبار عند الانتهاء.</p></div></div>
+                <label className="management-field">اسم الاختبار<input value={standaloneEssayTitle} onChange={(event) => setStandaloneEssayTitle(event.target.value)} placeholder="مثال: اختبار مقالي على الوحدة الأولى" /></label>
+                <label className="management-field">وصف الاختبار (اختياري)<input value={standaloneEssayDescription} onChange={(event) => setStandaloneEssayDescription(event.target.value)} placeholder="اكتب وصفًا مختصرًا" /></label>
+                <div className="standalone-essay-meta">
+                  <label className="management-field">الصف الدراسي<select value={standaloneEssayGrade} onChange={(event) => { setStandaloneEssayGrade(event.target.value); setStandaloneEssayTerm(''); setStandaloneEssayUnitId('1'); setStandaloneEssayLessonId(''); }}>{gradeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+                  {standaloneEssayGrade === 'first-secondary' ? <label className="management-field">الترم<select value={standaloneEssayTerm} onChange={(event) => { setStandaloneEssayTerm(event.target.value); setStandaloneEssayLessonId(''); }} required><option value="">اختر الترم</option>{termOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label> : <label className="management-field">الوحدة<select value={standaloneEssayUnitId} onChange={(event) => { setStandaloneEssayUnitId(event.target.value); setStandaloneEssayLessonId(''); }}>{secondSecondaryUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.label}</option>)}</select></label>}
+                </div>
+                <label className="management-field">المحاضرة المرتبطة (اختياري)<select value={standaloneEssayLessonId} onChange={(event) => setStandaloneEssayLessonId(event.target.value)}><option value="">اختبار عام للوحدة</option>{adminLessons.filter((lesson) => lesson.grade === standaloneEssayGrade && (standaloneEssayGrade === 'first-secondary' ? lesson.term === standaloneEssayTerm : Number(lesson.unitId) === Number(standaloneEssayUnitId))).map((lesson) => <option key={lesson.id} value={String(lesson.id)}>{lesson.title}</option>)}</select></label>
+                <form className="standalone-essay-question-form" onSubmit={appendStandaloneEssayQuestion}>
+                  <h4>السؤال التالي</h4>
+                  <label className="management-field">نص السؤال<textarea value={standaloneEssayText} onChange={(event) => setStandaloneEssayText(event.target.value)} rows="3" required placeholder="اكتب السؤال المقالي هنا" /></label>
+                  <label className="management-field">الإجابة النموذجية (اختياري)<textarea value={standaloneEssayModelAnswer} onChange={(event) => setStandaloneEssayModelAnswer(event.target.value)} rows="2" placeholder="للمدرس فقط" /></label>
+                  <label className="management-field essay-points-field">درجة السؤال<input type="number" min="0.1" max="100" step="0.1" value={standaloneEssayPoints} onChange={(event) => setStandaloneEssayPoints(event.target.value)} required /></label>
+                  <button type="submit" className="secondary-btn">＋ إضافة السؤال للمسودة</button>
+                </form>
+                {standaloneEssayQuestions.length > 0 && <div className="standalone-essay-draft"><h4>أسئلة الاختبار ({standaloneEssayQuestions.length})</h4>{standaloneEssayQuestions.map((question, index) => <div className="standalone-essay-draft-row" key={question.id}><span><b>سؤال {index + 1}</b>{question.text}<small>{question.points} درجة</small></span><button type="button" className="secondary-btn" onClick={() => setStandaloneEssayQuestions((current) => current.filter((item) => item.id !== question.id))}>حذف</button></div>)}</div>}
+                {standaloneEssayMessage && <div className="message" role="status">{standaloneEssayMessage}</div>}
+                <button type="button" className="primary-btn" onClick={saveStandaloneEssayQuiz} disabled={standaloneEssaySaving}>{standaloneEssaySaving ? 'جارٍ الحفظ...' : 'حفظ الاختبار المقالي'}</button>
+              </div>
+
               <div className="admin-quiz-shell">
                 <div className="admin-cards-panel panel">
                   <div className="admin-management-header">
@@ -2449,7 +3030,11 @@ function App() {
 
                       <div className="admin-stat-row">
                         <span>عدد الأسئلة: {selectedAdminQuiz.questions?.length || 0}</span>
-                        <span>المحاضرة: {selectedAdminQuiz.lessonId ? videos.find((video) => String(video.id) === String(selectedAdminQuiz.lessonId))?.title || 'محاضرة مرتبطة' : 'اختبار عام'}</span>
+                        <span>المحاضرة: {selectedAdminQuiz.lessonId ? adminLessons.find((lesson) => String(lesson.id) === String(selectedAdminQuiz.lessonId))?.title || 'محاضرة مرتبطة' : 'اختبار عام'}</span>
+                      </div>
+                      <div className="question-type-list">
+                        <h4>أسئلة الاختبار</h4>
+                        {(selectedAdminQuiz.questions || []).map((question, index) => <div key={question.id} className="question-type-row"><span>{index + 1}. {question.text}</span><b>{question.type === 'essay' ? `مقالي · ${question.points || 1} درجات` : 'اختيار من متعدد'}</b></div>)}
                       </div>
                     </>
                   ) : (
@@ -2463,7 +3048,7 @@ function App() {
                 <label className="management-field">اسم الاختبار<input value={quizTitle} onChange={(event) => setQuizTitle(event.target.value)} placeholder="مثال: اختبار الوحدة الأولى" required /></label>
                 <label className="management-field">الصف الدراسي<select value={quizGrade} onChange={(event) => { setQuizGrade(event.target.value); setQuizTerm(''); setQuizUnitId('1'); setQuizLessonId(''); }}>{gradeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
                 {quizGrade === 'first-secondary' ? <label className="management-field">الترم<select value={quizTerm} onChange={(event) => { setQuizTerm(event.target.value); setQuizLessonId(''); }} required><option value="">اختر الترم</option>{termOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label> : <label className="management-field">الوحدة<select value={quizUnitId} onChange={(event) => { setQuizUnitId(event.target.value); setQuizLessonId(''); }}>{secondSecondaryUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.label}</option>)}</select></label>}
-                <label className="management-field">المحاضرة المرتبطة<select value={quizLessonId} onChange={(event) => setQuizLessonId(event.target.value)}><option value="">اختبار عام للوحدة</option>{videos.filter((video) => video.grade === quizGrade && (quizGrade === 'first-secondary' ? video.term === quizTerm : Number(video.unitId) === Number(quizUnitId))).map((video) => <option key={video.id} value={String(video.id)}>{video.title}</option>)}</select></label>
+                <label className="management-field">المحاضرة المرتبطة<select value={quizLessonId} onChange={(event) => setQuizLessonId(event.target.value)}><option value="">اختبار عام للوحدة</option>{adminLessons.filter((lesson) => lesson.grade === quizGrade && (quizGrade === 'first-secondary' ? lesson.term === quizTerm : Number(lesson.unitId) === Number(quizUnitId))).map((lesson) => <option key={lesson.id} value={String(lesson.id)}>{lesson.title}</option>)}</select></label>
                 <div className="pdf-import-row"><input type="file" accept="application/pdf" onChange={(event) => setPdfFile(event.target.files?.[0] || null)} required /><button type="submit" className="primary-btn">تحليل PDF</button></div>
                 {pdfImportMessage && <div className="message">{pdfImportMessage}</div>}
                 {pdfPreview && <div className="pdf-preview">{pdfPreview.questions.map((question) => <div key={question.id} className="pdf-question-preview"><strong>{question.id}. {question.text}</strong><div>{question.options.map((option, index) => <label key={option}><input type="radio" name={`pdf-${question.id}`} checked={question.correctOption === index} onChange={() => setPdfPreview((current) => ({ ...current, questions: current.questions.map((item) => item.id === question.id ? { ...item, correctOption: index } : item) }))} /> {option}</label>)}</div></div>)}<button type="button" className="primary-btn" onClick={savePdfQuiz} disabled={pdfSaving}>{pdfSaving ? 'جاري الحفظ في قاعدة البيانات...' : 'حفظ الاختبار بعد المراجعة'}</button></div>}
@@ -2498,7 +3083,7 @@ function App() {
               </form>
             </section>}
 
-            <section className="stats-grid">
+            {adminSection === 'overview' && <section className="stats-grid">
               <div className="stat-card">
                 <span>إجمالي الطلاب</span>
                 <strong>{dashboard.stats.totalStudents}</strong>
@@ -2519,12 +3104,12 @@ function App() {
                 <span>طلاب لديهم وصول</span>
                 <strong>{dashboard.stats.activeStudents}</strong>
               </div>
-            </section>
+            </section>}
 
-            <section className="panel">
+            {adminSection === 'overview' && <section className="panel">
               <h3>نظرة عامة</h3>
               <p>{dashboard.summary}</p>
-            </section>
+            </section>}
 
             {adminSection === 'overview' && <section className="student-management panel">
               <div className="video-form-header">
@@ -2571,50 +3156,92 @@ function App() {
             </section>}
 
             {adminSection === 'videos' && <section className="admin-lecture-shell">
-              <div className="section-heading"><span className="eyebrow">المحتوى</span><h2>إدارة المحاضرات</h2></div>
+              <div className="section-heading admin-lecture-heading">
+                <span className="eyebrow">المحتوى الدراسي</span>
+                <h2>إدارة المحاضرات</h2>
+                <p>{lectureManagementView === 'list' ? 'اضغط على اسم المحاضرة لعرض تفاصيلها وتعديل محتواها.' : lectureManagementView === 'details' ? 'عدّل بيانات المحاضرة أو محتواها، ثم ارجع للقائمة وقتما تحب.' : 'أضف فيديو إلى محاضرة موجودة أو أنشئ محاضرة جديدة.'}</p>
+                {lectureManagementView !== 'add' && <button type="button" className="primary-btn admin-add-shortcut" onClick={() => setLectureManagementView('add')}>إضافة محاضرة أو فيديو</button>}
+              </div>
 
-              <div className="admin-lecture-layout">
-                <div className="admin-cards-panel panel">
+              <div className="admin-lecture-layout admin-lecture-single-view">
+                {lectureManagementView === 'list' && <div className="admin-lecture-table panel">
                   <div className="admin-management-header">
-                    <h3>قائمة المحاضرات</h3>
+                    <div><h3>قائمة المحاضرات</h3><p>اختار اسم المحاضرة لفتح تفاصيلها.</p></div>
                   </div>
+                  {adminLessons.length > 0 ? <table className="admin-lesson-table">
+                    <thead><tr><th scope="col">اسم المحاضرة</th></tr></thead>
+                    <tbody>{adminLessons.map((lesson) => (
+                      <tr key={lesson.id}>
+                        <td><button type="button" className="admin-lesson-open" onClick={() => {
+                          setSelectedAdminLessonId(lesson.id);
+                          setEditingLessonTitle(lesson.title);
+                          setLectureManagementView('details');
+                          const firstVideo = lesson.videos[0];
+                          if (firstVideo) {
+                            setSelectedAdminLectureId(String(firstVideo.id));
+                            setSelectedVideo(firstVideo);
+                            startEditVideo(firstVideo);
+                          }
+                        }}><span>{lesson.title}</span><span className="admin-lesson-open-arrow" aria-hidden="true">›</span></button></td>
+                      </tr>
+                    ))}</tbody>
+                  </table> : <div className="admin-lecture-empty"><h3>لا توجد محاضرات بعد</h3><p>اضغط «إضافة محاضرة أو فيديو» لبدء إضافة المحتوى.</p></div>}
+                </div>}
 
-                  <div className="admin-list-table">
-                    {videos.map((video) => (
-                      <button
-                        type="button"
-                        key={video.id}
-                        className={`admin-list-row ${selectedAdminLectureId === String(video.id) ? 'selected' : ''}`}
-                        onClick={() => {
-                          setSelectedAdminLectureId(String(video.id));
-                          setSelectedVideo(video);
-                          startEditVideo(video);
-                        }}
-                      >
-                        <div>
-                          <strong>{video.title}</strong>
-                          <small>{formatContentLocation(video)}</small>
-                        </div>
-                        <span>{video.lessonPdfAvailable ? 'PDF جاهز' : 'بدون PDF'}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="panel admin-details-panel">
-                  {selectedAdminLecture ? (
+                {lectureManagementView === 'details' && <div className="panel admin-details-panel">
+                  {selectedAdminLesson ? (
                     <>
-                      <div className="admin-management-header details-header">
+                      <div className="admin-management-header details-header admin-lesson-hero">
                         <div>
                           <span className="eyebrow">المحاضرة</span>
-                          <h3>{selectedAdminLecture.title}</h3>
+                          <h3>{selectedAdminLesson.title}</h3>
                         </div>
-                        <span className="content-location-badge">{formatContentLocation(selectedAdminLecture)}</span>
+                        <div className="admin-detail-actions"><span className="content-location-badge">{formatContentLocation(selectedAdminLesson)}</span><button type="button" className="secondary-btn" onClick={() => setLectureManagementView('list')}>العودة للمحاضرات</button></div>
                       </div>
 
+                      <div className="admin-edit-box admin-lesson-title-editor">
+                        <div className="admin-subsection-heading"><h4>بيانات المحاضرة</h4><p>حدّث اسم المحاضرة الذي يظهر للطلاب.</p></div>
+                        <label className="management-field">
+                          <span className="admin-field-label">اسم المحاضرة</span>
+                          <input value={editingLessonTitle} onChange={(event) => setEditingLessonTitle(event.target.value)} aria-label="اسم المحاضرة" />
+                        </label>
+                        <button type="button" className="primary-btn small-btn" onClick={saveLessonTitle}>حفظ اسم المحاضرة</button>
+                      </div>
+
+                      <div className="lesson-resource-list admin-detail-resources">
+                        <div className="admin-subsection-heading"><h4>محتوى المحاضرة</h4><p>اختار فيديو لعرضه وتعديل بياناته.</p></div>
+                        {!selectedAdminLessonResources.length && <p className="admin-resource-empty">لا يوجد محتوى مضاف لهذه المحاضرة بعد. يمكنك إضافة فيديو أو ملف من زر الإضافة بالأعلى.</p>}
+                        {selectedAdminLessonResources.map((resource, index) => resource.type === 'video' ? (
+                          <button
+                            type="button"
+                            key={`video-${resource.id}`}
+                            className={`lesson-resource-row ${selectedAdminLectureId === String(resource.id) ? 'selected' : ''}`}
+                            onClick={() => {
+                              setSelectedAdminLectureId(String(resource.id));
+                              setSelectedVideo(resource.video);
+                              startEditVideo(resource.video);
+                            }}
+                          >
+                            <span className="lesson-resource-index">{String(index + 1).padStart(2, '0')}</span>
+                            <span><strong>{resource.video.title}</strong><small>فيديو شرح</small></span>
+                            <span aria-hidden="true">›</span>
+                          </button>
+                        ) : (
+                          <div className="lesson-resource-row" key={`pdf-${resource.id}`}>
+                            <span className="lesson-resource-index">{String(index + 1).padStart(2, '0')}</span>
+                            <span><strong>{resource.pdf.name}</strong><small>ملف PDF شرح</small></span>
+                            <button type="button" className="small-btn danger-btn" onClick={() => deleteLessonPdfResource(selectedAdminLesson, resource.pdf)} disabled={lessonPdfDeleting !== null}>
+                              {lessonPdfDeleting === resource.id ? 'جاري الحذف...' : 'حذف'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
+                      {selectedAdminLecture && Number(selectedAdminLecture.lessonId || selectedAdminLecture.id) === selectedAdminLesson.id && <section className="admin-selected-video-section">
+                      <div className="admin-subsection-heading"><h4>الفيديو المختار</h4><p>شاهد الفيديو، وافتح خيارات التعديل عند الحاجة.</p></div>
                       <div className="admin-video-preview-box">
                         <iframe
-                          src={selectedAdminLecture.url}
+                          src={getPlayableVideoUrl(selectedAdminLecture.url)}
                           title={selectedAdminLecture.title}
                           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                           referrerPolicy="strict-origin-when-cross-origin"
@@ -2623,17 +3250,27 @@ function App() {
                         />
                       </div>
 
+                      <details className="admin-detail-disclosure">
+                        <summary><span><strong>تعديل بيانات الفيديو</strong><small>العنوان، رابط الفيديو، وصورة الغلاف</small></span><span className="admin-disclosure-chevron" aria-hidden="true">⌄</span></summary>
                       <div className="admin-edit-box">
-                        <label className="management-field">
-                          اسم المحاضرة
-                          <input value={editingVideoTitle} onChange={(event) => setEditingVideoTitle(event.target.value)} />
+                        <label className="management-field admin-lecture-field">
+                          <span className="admin-field-label">اسم فيديو الشرح</span>
+                          <small className="admin-field-help">ده العنوان اللي هيظهر للطالب.</small>
+                          <input value={editingVideoTitle} onChange={(event) => setEditingVideoTitle(event.target.value)} placeholder="اكتب اسم فيديو الشرح" />
                         </label>
-                        <label className="management-field">
-                          رابط شرح الفيديو
-                          <input value={editingVideoUrl} onChange={(event) => setEditingVideoUrl(event.target.value)} />
+                        <label className="management-field admin-lecture-field">
+                          <span className="admin-field-label">رابط شرح الفيديو</span>
+                          <small className="admin-field-help">الصق رابط الفيديو أو كود التضمين.</small>
+                          <input value={editingVideoUrl} onChange={(event) => setEditingVideoUrl(event.target.value)} placeholder="https://..." dir="ltr" />
                         </label>
-                        <label className="management-field">
-                          رابط غلاف المحاضرة
+                        <label className="management-field admin-lecture-field">
+                          <span className="admin-field-label">سعر المحاضرة</span>
+                          <small className="admin-field-help">اكتب السعر بالجنيه. أدخل 0 لو المحاضرة مجانية.</small>
+                          <input type="number" min="0" step="0.01" inputMode="decimal" value={editingVideoPrice} onChange={(event) => setEditingVideoPrice(event.target.value)} placeholder="مثال: 50" required />
+                        </label>
+                        <label className="management-field admin-lecture-field">
+                          <span className="admin-field-label">رابط صورة الغلاف</span>
+                          <small className="admin-field-help">اختياري؛ اتركه فارغًا لاستخدام الغلاف التلقائي.</small>
                           <input
                             type="url"
                             value={editingVideoCoverIsCustom && !editingVideoCover.startsWith('data:image') ? editingVideoCover : ''}
@@ -2641,11 +3278,13 @@ function App() {
                               setEditingVideoCover(event.target.value);
                               setEditingVideoCoverIsCustom(Boolean(event.target.value));
                             }}
-                            placeholder="اتركه فارغًا لإعادة استخراج صورة الفيديو تلقائيًا"
+                            placeholder="الصق رابط صورة الغلاف (اختياري)"
+                            dir="ltr"
                           />
                         </label>
-                        <label className="management-field">
-                          أو رفع صورة غلاف من الجهاز
+                        <label className="management-field admin-lecture-field admin-cover-upload-field">
+                          <span className="admin-field-label">رفع صورة غلاف من الجهاز</span>
+                          <small className="admin-field-help">اختار صورة من جهازك بدل الرابط.</small>
                           <input type="file" accept="image/*" onChange={(event) => {
                             setEditingVideoCoverIsCustom(true);
                             handleLocalCoverUpload(event, setEditingVideoCover);
@@ -2655,50 +3294,16 @@ function App() {
                         <div className="quiz-card-actions">
                           <button type="button" className="primary-btn small-btn" onClick={saveEditedVideo}>حفظ التعديلات</button>
                           <button type="button" className="secondary-btn small-btn" onClick={cancelEditVideo}>إلغاء</button>
-                          <button type="button" className="small-btn danger-btn" onClick={() => handleDeleteVideo(selectedAdminLecture.id)}>حذف المحاضرة</button>
+                          <button type="button" className="small-btn danger-btn" onClick={() => handleDeleteVideo(selectedAdminLecture.id)}>حذف فيديو الشرح</button>
                         </div>
                       </div>
+                      </details>
 
+                      <details className="admin-detail-disclosure">
+                        <summary><span><strong>إضافة اختبار للمحاضرة</strong><small>ارفع ملف PDF لتحويله إلى اختبار</small></span><span className="admin-disclosure-chevron" aria-hidden="true">⌄</span></summary>
                       <div className="admin-upload-box">
                         <div className="admin-upload-head">
-                          <h4>ملف شرح المحاضرة PDF</h4>
-                          <span className={`lesson-pdf-status ${selectedAdminLecture.lessonPdfAvailable ? 'ready' : ''}`} role="status">
-                            {selectedAdminLecture.lessonPdfAvailable ? 'ملف PDF محفوظ' : 'لا يوجد PDF بعد'}
-                          </span>
-                        </div>
-
-                        <label className="lesson-pdf-file-field admin-pdf-field">
-                          <span>{lessonPdfFile ? lessonPdfFile.name : 'اختيار ملف PDF جديد'}</span>
-                          <input
-                            type="file"
-                            accept="application/pdf,.pdf"
-                            onChange={(event) => {
-                              const selectedFile = event.target.files?.[0] || null;
-                              setLessonPdfFile(selectedFile);
-                              setLessonPdfUploadVideoId(selectedAdminLecture.id);
-                              setLessonPdfUploadMessage('');
-                              event.target.value = '';
-                            }}
-                          />
-                        </label>
-
-                        <div className="quiz-card-actions">
-                          <button type="button" className="primary-btn small-btn" onClick={() => handleLessonPdfUpload(selectedAdminLecture.id)} disabled={lessonPdfUploading || lessonPdfDeleting !== null || !lessonPdfFile}>
-                            {lessonPdfUploading && lessonPdfUploadVideoId === selectedAdminLecture.id ? 'جاري الرفع...' : selectedAdminLecture.lessonPdfAvailable ? 'استبدال PDF' : 'إضافة PDF'}
-                          </button>
-                          {selectedAdminLecture.lessonPdfAvailable && (
-                            <button type="button" className="small-btn danger-btn" onClick={() => handleLessonPdfDelete(selectedAdminLecture)} disabled={lessonPdfUploading || lessonPdfDeleting !== null}>
-                              {lessonPdfDeleting === selectedAdminLecture.id ? 'جاري الحذف...' : 'حذف PDF'}
-                            </button>
-                          )}
-                        </div>
-
-                        {lessonPdfUploadMessage && <div className="message">{lessonPdfUploadMessage}</div>}
-                      </div>
-
-                      <div className="admin-upload-box">
-                        <div className="admin-upload-head">
-                          <h4>اختبار المحاضرة PDF</h4>
+                          <h4>ملف الاختبار</h4>
                           <span className="lesson-pdf-status">استخدم نفس أسلوب تحليل PDF الموجود في بنك الأسئلة</span>
                         </div>
 
@@ -2756,28 +3361,51 @@ function App() {
 
                         {lectureQuizMessage && <div className="message">{lectureQuizMessage}</div>}
                       </div>
+                      </details>
+                    </section>
+                      }
+
+                      <details className="admin-detail-disclosure">
+                        <summary><span><strong>إضافة ملف شرح</strong><small>{selectedAdminLesson.pdfs.length} ملفات مرتبطة بالمحاضرة</small></span><span className="admin-disclosure-chevron" aria-hidden="true">⌄</span></summary>
+                      <div className="admin-upload-box">
+                        <label className="lesson-pdf-file-field admin-pdf-field">
+                          <span>{lessonPdfUploadLessonId === selectedAdminLesson.id && lessonPdfFile ? lessonPdfFile.name : 'اختيار ملف PDF'}</span>
+                          <input type="file" accept="application/pdf,.pdf" onChange={(event) => {
+                            setLessonPdfFile(event.target.files?.[0] || null);
+                            setLessonPdfUploadLessonId(selectedAdminLesson.id);
+                            setLessonPdfUploadMessage('');
+                            event.target.value = '';
+                          }} />
+                        </label>
+                        <button type="button" className="primary-btn small-btn" onClick={() => uploadLessonPdfResource(selectedAdminLesson.id)} disabled={lessonPdfUploading || lessonPdfDeleting !== null || lessonPdfUploadLessonId !== selectedAdminLesson.id || !lessonPdfFile}>
+                          {lessonPdfUploading ? 'جاري الرفع...' : 'إضافة ملف PDF'}
+                        </button>
+                        {lessonPdfUploadMessage && lessonPdfUploadLessonId === selectedAdminLesson.id && <div className="message">{lessonPdfUploadMessage}</div>}
+                      </div>
+                      </details>
                     </>
                   ) : (
-                    <p>اختر محاضرة من القائمة</p>
+                    <div className="admin-lecture-empty">
+                      <span>01</span>
+                      <h3>ابدأ باختيار محاضرة</h3>
+                      <p>ستظهر هنا فيديوهات الشرح وملفات المحاضرة وخيارات تعديلها.</p>
+                    </div>
                   )}
-                </div>
+                </div>}
               </div>
 
-              <div className="panel admin-add-panel">
+              {lectureManagementView === 'add' && <div id="admin-add-lecture" className="panel admin-add-panel">
                 <div className="video-form-header">
-                  <h3>إضافة محاضرة جديدة</h3>
-                  <p>تُستخرج صورة YouTube أو Bunny تلقائيًا عند ترك الغلاف فارغًا. أضف صورة منفصلة لتكون غلافًا مخصصًا.</p>
+                  <span className="eyebrow">إضافة محتوى</span>
+                  <h3>أضف فيديو شرح</h3>
+                  <p>اربط الفيديو بمحاضرة موجودة، أو أنشئ محاضرة جديدة من نفس النموذج.</p>
+                  <button type="button" className="secondary-btn admin-add-back" onClick={() => setLectureManagementView('list')}>العودة لقائمة المحاضرات</button>
                 </div>
 
                 <form onSubmit={handleAddVideo} className="video-form">
                   <label>
-                    عنوان المحاضرة
-                    <input type="text" value={videoTitle} onChange={(event) => setVideoTitle(event.target.value)} placeholder="مثال: شرح الوحدة الأولى" />
-                  </label>
-
-                  <label>
                     الصف الدراسي
-                    <select value={videoGrade} onChange={(event) => { setVideoGrade(event.target.value); setVideoTerm(''); setVideoUnitId('1'); }}>
+                    <select value={videoGrade} onChange={(event) => { setVideoGrade(event.target.value); setVideoTerm(''); setVideoUnitId('1'); setVideoLessonId(''); }}>
                       {gradeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </select>
                   </label>
@@ -2785,7 +3413,7 @@ function App() {
                   {videoGrade === 'first-secondary' ? (
                     <label>
                       الترم
-                      <select value={videoTerm} onChange={(event) => setVideoTerm(event.target.value)} required>
+                      <select value={videoTerm} onChange={(event) => { setVideoTerm(event.target.value); setVideoLessonId(''); }} required>
                         <option value="">اختر الترم</option>
                         {termOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
@@ -2793,11 +3421,33 @@ function App() {
                   ) : (
                     <label>
                       الوحدة
-                      <select value={videoUnitId} onChange={(event) => setVideoUnitId(event.target.value)}>
+                      <select value={videoUnitId} onChange={(event) => { setVideoUnitId(event.target.value); setVideoLessonId(''); }}>
                         {secondSecondaryUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.label}</option>)}
                       </select>
                     </label>
                   )}
+
+                  <label>
+                    ربط الفيديو بمحاضرة
+                    <select value={videoLessonId} onChange={(event) => setVideoLessonId(event.target.value)}>
+                      <option value="">إنشاء محاضرة جديدة</option>
+                      {adminLessons.filter((lesson) => lesson.grade === videoGrade
+                        && lesson.term === (videoGrade === 'first-secondary' ? videoTerm : '')
+                        && Number(lesson.unitId) === Number(videoUnitId)).map((lesson) => (
+                        <option key={lesson.id} value={lesson.id}>{lesson.title}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {!videoLessonId && <label>
+                    اسم المحاضرة الجديدة
+                    <input type="text" value={lessonTitle} onChange={(event) => setLessonTitle(event.target.value)} placeholder="مثال: المحاضرة الأولى" required />
+                  </label>}
+
+                  <label>
+                    عنوان فيديو الشرح
+                    <input type="text" value={videoTitle} onChange={(event) => setVideoTitle(event.target.value)} placeholder="مثال: الجزء الأول" required />
+                  </label>
 
                   <label>
                     رابط الشرح المرئي أو كود التضمين
@@ -2814,22 +3464,17 @@ function App() {
                     <input type="file" accept="image/*" onChange={(event) => handleLocalCoverUpload(event, setVideoCover)} />
                   </label>
 
-                  <label className="management-field">
-                    ملف PDF شرحها (اختياري)
-                    <input type="file" accept="application/pdf,.pdf" onChange={(event) => setNewLecturePdfFile(event.target.files?.[0] || null)} />
-                  </label>
-
                   {videoFormError && <div className="error-box">{videoFormError}</div>}
-                  <button type="submit" className="primary-btn">حفظ المحاضرة</button>
+                  <button type="submit" className="primary-btn">حفظ فيديو الشرح</button>
                 </form>
-              </div>
+              </div>}
             </section>}
 
             {adminSection === 'lesson-files' && <section className="lesson-files-panel">
               <div className="video-form-header">
                 <span className="eyebrow">ترتيب محتوى الطالب</span>
                 <h2>ملفات شرح المحاضرات</h2>
-                <p>اختاري الصف والوحدة، ثم ارفعي ملف PDF بجوار المحاضرة المطابقة. ترتيب المحاضرات هنا هو نفسه في صفحة الطالب.</p>
+                <p>يمكن لكل محاضرة أن تحتوي على عدة ملفات PDF. تظهر الملفات من الأقدم إلى الأحدث دون عرض تاريخ الرفع.</p>
               </div>
 
               <div className="lesson-files-filters">
@@ -2863,19 +3508,29 @@ function App() {
               </div>
 
               <div className="lesson-files-list">
-                {videos.filter((video) => video.grade === lessonPdfGrade && (lessonPdfGrade === 'first-secondary' ? video.term === lessonPdfTerm : Number(video.unitId) === Number(lessonPdfUnitId))).map((video, index) => (
-                  <article className="lesson-file-row" key={video.id}>
+                {adminLessons.filter((lesson) => lesson.grade === lessonPdfGrade && (lessonPdfGrade === 'first-secondary' ? lesson.term === lessonPdfTerm : Number(lesson.unitId) === Number(lessonPdfUnitId))).map((lesson, index) => (
+                  <article className="lesson-file-row" key={lesson.id}>
                     <span className="lesson-file-number">{String(index + 1).padStart(2, '0')}</span>
                     <div className="lesson-file-details">
-                      <span className="content-location-badge">{formatContentLocation(video)} • المحاضرة {index + 1}</span>
-                      <h3>{video.title}</h3>
-                      <span className={`lesson-pdf-status ${video.lessonPdfAvailable ? 'ready' : ''}`} role="status">
-                        {lessonPdfUploadVideoId === video.id && lessonPdfUploadMessage ? lessonPdfUploadMessage : video.lessonPdfAvailable ? 'ملف PDF محفوظ' : 'لم يُرفع ملف شرح بعد'}
-                      </span>
+                      <span className="content-location-badge">{formatContentLocation(lesson)} • المحاضرة {index + 1}</span>
+                      <h3>{lesson.title}</h3>
+                      <span className="lesson-pdf-status">{lesson.videos.length} فيديو شرح • {lesson.pdfs.length} ملف PDF</span>
+                      <div className="lesson-resource-list">
+                        {lesson.pdfs.map((pdf, pdfIndex) => (
+                          <div className="lesson-resource-row" key={pdf.id}>
+                            <span className="lesson-resource-index">{String(pdfIndex + 1).padStart(2, '0')}</span>
+                            <span><strong>{pdf.name}</strong><small>PDF شرح</small></span>
+                            <button type="button" className="small-btn danger-btn" onClick={() => deleteLessonPdfResource(lesson, pdf)} disabled={lessonPdfDeleting !== null}>
+                              {lessonPdfDeleting === pdf.id ? 'جاري الحذف...' : 'حذف'}
+                            </button>
+                          </div>
+                        ))}
+                        {!lesson.pdfs.length && <span className="lesson-pdf-status">لا توجد ملفات PDF لهذه المحاضرة بعد.</span>}
+                      </div>
                     </div>
                     <div className="lesson-file-actions">
                       <label className="lesson-pdf-file-field">
-                        <span>{lessonPdfUploadVideoId === video.id && lessonPdfFile ? lessonPdfFile.name : 'اختيار ملف PDF'}</span>
+                        <span>{lessonPdfUploadLessonId === lesson.id && lessonPdfFile ? lessonPdfFile.name : 'اختيار ملف PDF'}</span>
                         <input
                           type="file"
                           accept="application/pdf,.pdf"
@@ -2883,23 +3538,20 @@ function App() {
                             const selectedFile = event.target.files?.[0] || null;
                             setLessonPdfFile(selectedFile);
                             event.target.value = '';
-                            setLessonPdfUploadVideoId(video.id);
+                            setLessonPdfUploadLessonId(lesson.id);
                             setLessonPdfUploadMessage('');
                           }}
                         />
                       </label>
                       <div className="lesson-file-buttons">
-                        <button type="button" className="primary-btn small-btn" onClick={() => handleLessonPdfUpload(video.id)} disabled={lessonPdfUploading || lessonPdfDeleting !== null || lessonPdfUploadVideoId !== video.id || !lessonPdfFile}>
-                          {lessonPdfUploading && lessonPdfUploadVideoId === video.id ? 'جاري الرفع...' : video.lessonPdfAvailable ? 'استبدال PDF' : 'حفظ PDF'}
+                        <button type="button" className="primary-btn small-btn" onClick={() => uploadLessonPdfResource(lesson.id)} disabled={lessonPdfUploading || lessonPdfDeleting !== null || lessonPdfUploadLessonId !== lesson.id || !lessonPdfFile}>
+                          {lessonPdfUploading && lessonPdfUploadLessonId === lesson.id ? 'جاري الرفع...' : 'إضافة PDF'}
                         </button>
-                        {video.lessonPdfAvailable && <button type="button" className="small-btn danger-btn" onClick={() => handleLessonPdfDelete(video)} disabled={lessonPdfUploading || lessonPdfDeleting !== null}>
-                          {lessonPdfDeleting === video.id ? 'جاري الحذف...' : 'حذف PDF'}
-                        </button>}
                       </div>
                     </div>
                   </article>
                 ))}
-                {!videos.some((video) => video.grade === lessonPdfGrade && (lessonPdfGrade === 'first-secondary' ? video.term === lessonPdfTerm : Number(video.unitId) === Number(lessonPdfUnitId))) && (
+                {!adminLessons.some((lesson) => lesson.grade === lessonPdfGrade && (lessonPdfGrade === 'first-secondary' ? lesson.term === lessonPdfTerm : Number(lesson.unitId) === Number(lessonPdfUnitId))) && (
                   <div className="empty-state">لا توجد محاضرات مضافة لهذه الوحدة بعد. أضيفي محاضرة من قسم «المحاضرات».</div>
                 )}
               </div>
