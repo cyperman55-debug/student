@@ -92,20 +92,6 @@ function getPlayableVideoUrl(value) {
   }
 }
 
-function getDirectVideoPageUrl(value) {
-  const playableUrl = getPlayableVideoUrl(value);
-  try {
-    const videoUrl = new URL(playableUrl);
-    if (videoUrl.hostname === 'player.mediadelivery.net') {
-      const bunnyParts = videoUrl.pathname.match(/^\/embed\/(\d+)\/([\w-]+)/i);
-      if (bunnyParts) videoUrl.pathname = `/play/${bunnyParts[1]}/${bunnyParts[2]}`;
-    }
-    return videoUrl.toString();
-  } catch {
-    return playableUrl;
-  }
-}
-
 const moneyNumberFormatter = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 
 function CurrencyAmount({ amount }) {
@@ -2506,7 +2492,6 @@ function App() {
                     </div>
                     <div className="lesson-video-actions">
                       <button type="button" className="secondary-btn lesson-video-stop" onClick={() => playLessonVideo(resource.video)}>إيقاف الشرح</button>
-                      <a className="lesson-video-direct-link" href={getDirectVideoPageUrl(resource.video.url)} target="_blank" rel="noreferrer">فتح الفيديو مباشرةً <span aria-hidden="true">↗</span></a>
                     </div>
                   </>
                 ) : (

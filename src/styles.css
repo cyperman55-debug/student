@@ -3352,8 +3352,6 @@ animation: robot-idle 6s ease-in-out infinite, robot-step-in 720ms cubic-bezier(
 .lesson-video-native { object-fit: contain; background: #0f172a; }
 .lesson-video-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 9px; }
 .lesson-video-actions .lesson-video-stop { margin: 0; }
-.lesson-video-direct-link { display: inline-flex; align-items: center; gap: 6px; color: #2869a7; font-size: .84rem; font-weight: 750; text-decoration: none; }
-.lesson-video-direct-link:hover { color: #174674; text-decoration: underline; }
 
 .lesson-video-frame-wrap .video-watermark {
   z-index: 2;
