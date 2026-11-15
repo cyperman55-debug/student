@@ -92,6 +92,7 @@ const lessonSchema = new mongoose.Schema({
   grade: { type: String, default: 'second-secondary' },
   term: { type: String, default: '' },
   unitId: { type: Number, default: 1, min: 1 },
+  requiredQuizId: { type: String, default: '' },
   createdAt: { type: Date, default: Date.now },
 }, { versionKey: false });
 const Lesson = mongoose.models.Lesson || mongoose.model('Lesson', lessonSchema);
@@ -141,6 +142,13 @@ const rechargeSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 }, { versionKey: false });
 const RechargeRequest = mongoose.models.RechargeRequest || mongoose.model('RechargeRequest', rechargeSchema);
+const unitSettingSchema = new mongoose.Schema({
+  unitId: { type: Number, required: true, unique: true, min: 1, max: 7 },
+  title: { type: String, required: true, trim: true, maxlength: 100 },
+  image: { type: String, default: '' },
+  visible: { type: Boolean, default: true },
+}, { versionKey: false });
+const UnitSetting = mongoose.models.UnitSetting || mongoose.model('UnitSetting', unitSettingSchema);
 let mongoReady = false;
 let mongoError = null;
 const productionMode = process.env.NODE_ENV === 'production';
@@ -158,6 +166,12 @@ const videoCatalog = [
   { id: 1, lessonId: 1, title: 'محاضرة تمهيدية', cover: 'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg', coverIsCustom: false, url: 'https://www.youtube.com/embed/dQw4w9WgXcQ', price: 10, grade: 'second-secondary', term: '', unitId: 1, packagePrice: 50 },
   { id: 2, lessonId: 2, title: 'شرح الوحدة الأولى', cover: 'https://img.youtube.com/vi/ysz5S6PUM-U/hqdefault.jpg', coverIsCustom: false, url: 'https://www.youtube.com/embed/ysz5S6PUM-U', price: 10, grade: 'second-secondary', term: '', unitId: 1, packagePrice: 50 },
 ];
+const unitSettings = Array.from({ length: 7 }, (_, index) => ({
+  unitId: index + 1,
+  title: `الوحدة ${index + 1}`,
+  image: '',
+  visible: true,
+}));
 const legacyGeneratedCovers = new Set([
   'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80',
   'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1200&q=80',
@@ -175,6 +189,7 @@ videoCatalog.forEach((video, index) => {
     grade: video.grade,
     term: video.term,
     unitId: video.unitId,
+    requiredQuizId: '',
     createdAt: video.createdAt,
   });
 });
@@ -410,6 +425,18 @@ const initializeMongo = () => mongoConfigured
           { $setOnInsert: lesson },
           { upsert: true },
         )));
+        const savedUnitSettings = await UnitSetting.find().lean();
+        const savedUnitSettingsById = new Map(savedUnitSettings.map((setting) => [Number(setting.unitId), setting]));
+        unitSettings.splice(0, unitSettings.length, ...unitSettings.map((setting) => ({
+          ...setting,
+          ...(savedUnitSettingsById.has(setting.unitId) ? savedUnitSettingsById.get(setting.unitId) : {}),
+          unitId: setting.unitId,
+        })));
+        await Promise.all(unitSettings.map((setting) => UnitSetting.updateOne(
+          { unitId: setting.unitId },
+          { $setOnInsert: setting },
+          { upsert: true },
+        )));
         const savedLessonPdfIds = new Set((await LessonPdf.distinct('videoId')).map(Number));
         videoCatalog.forEach((video) => { video.lessonPdfAvailable = savedLessonPdfIds.has(Number(video.id)); });
         const savedQuizzes = await Quiz.find().lean();
@@ -545,15 +572,26 @@ const paymentSettings = {
 };
 const activityLog = [];
 
+function studentCompletedQuiz(studentId, quizId) {
+  return quizAttempts.some((attempt) =>
+    String(attempt.quizId) === String(quizId)
+    && Number(attempt.studentId) === Number(studentId)
+    && Number(attempt.total) > 0
+  );
+}
+
 function studentCanAccessVideo(student, video, purchases = videoPurchases) {
   const key = packageKey(video.grade, video.term, video.unitId);
-  return Boolean(
+  const hasContentAccess = Boolean(
     student.contentUnlocked
     || student.contentAccess?.all
     || student.contentAccess?.packages?.includes(key)
     || student.contentAccess?.videoIds?.includes(video.id)
     || purchases.some((purchase) => purchase.videoId === video.id && purchase.studentId === student.id)
   );
+  const lesson = lessonCatalog.find((item) => Number(item.id) === Number(video.lessonId || video.id));
+  const requiredQuizId = String(lesson?.requiredQuizId || '');
+  return hasContentAccess && (!requiredQuizId || studentCompletedQuiz(student.id, requiredQuizId));
 }
 
 function studentHasAnyVideoAccess(student, purchases = videoPurchases) {
@@ -752,6 +790,8 @@ app.get('/api/public/units/second-secondary', async (req, res) => {
       .map((quiz) => Number(quiz.unitId) || 1),
   ]);
   const units = await Promise.all([...availableUnitIds].sort((left, right) => left - right).map(async (unitId) => {
+    const setting = unitSettings.find((item) => item.unitId === unitId);
+    if (setting?.visible === false) return null;
     const unitVideos = videoCatalog.filter((video) => video.grade === 'second-secondary' && Number(video.unitId) === unitId);
     const unitQuizzes = quizzes.filter((quiz) => quiz.published && quiz.grade === 'second-secondary' && Number(quiz.unitId) === unitId);
     const lessonIds = new Set(unitVideos.map((video) => Number(video.lessonId || video.id)));
@@ -764,15 +804,42 @@ app.get('/api/public/units/second-secondary', async (req, res) => {
       id: `second-secondary-${unitId}`,
       grade: 'second-secondary',
       unitId,
-      title: firstLesson?.title || unitVideos[0]?.title || `\u0627\u0644\u0648\u062d\u062f\u0629 ${unitId}`,
-      image: unitVideos.find((video) => video.cover)?.cover || '',
+      title: setting?.title || firstLesson?.title || unitVideos[0]?.title || `\u0627\u0644\u0648\u062d\u062f\u0629 ${unitId}`,
+      image: setting?.image || unitVideos.find((video) => video.cover)?.cover || '',
       lessonCount: lessonIds.size,
       quizCount: unitQuizzes.length,
       isNew: newestContentAt > 0 && Date.now() - newestContentAt < 30 * 24 * 60 * 60 * 1000,
     };
-  }));
+  })).then((units) => units.filter(Boolean));
 
   res.json({ units });
+});
+app.get('/api/admin/units', authenticate, requireAdmin, (req, res) => {
+  res.json({ units: unitSettings });
+});
+
+app.patch('/api/admin/units/:unitId', authenticate, requireAdmin, async (req, res) => {
+  const unitId = Number(req.params.unitId);
+  const setting = unitSettings.find((item) => item.unitId === unitId);
+  if (!setting) return res.status(404).json({ message: 'الوحدة غير موجودة' });
+
+  const title = req.body.title !== undefined ? String(req.body.title).trim() : setting.title;
+  const image = req.body.image !== undefined ? String(req.body.image).trim() : setting.image;
+  const visible = req.body.visible !== undefined ? req.body.visible : setting.visible;
+  const validImage = !image
+    || /^https?:\/\/\S+$/i.test(image)
+    || /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(image);
+
+  if (!title || title.length > 100 || typeof visible !== 'boolean' || !validImage || image.length > 3_000_000) {
+    return res.status(400).json({ message: 'تحقق من الاسم والصورة واختيار الظهور' });
+  }
+
+  const updatedSetting = { unitId, title, image, visible };
+  if (mongoReady) {
+    await UnitSetting.updateOne({ unitId }, { $set: updatedSetting }, { upsert: true });
+  }
+  Object.assign(setting, updatedSetting);
+  res.json({ unit: setting, message: 'تم حفظ إعدادات الوحدة' });
 });
 app.post('/api/login', async (req, res) => {
   if (!jwtConfigured) {
@@ -825,23 +892,22 @@ app.post('/api/auth/register', async (req, res) => {
   const validGrade = ['first-secondary', 'second-secondary'].includes(grade);
   const validTerm = term === '' || (grade === 'first-secondary' && ['first-term', 'second-term'].includes(term));
   const validEmail = !normalizedEmail || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
-  if (!name || !studentNumber || !studentPhone || !guardianPhone || !governorate || !password || password.length < 6 || !validGrade || !validTerm || !validEmail) {
-    return res.status(400).json({ message: 'الاسم ورقم الطالب ورقم هاتف الطالب ورقم ولي الأمر والمحافظة وكلمة المرور مطلوبة، والبريد الإلكتروني إن أُدخل يجب أن يكون صحيحًا' });
+  if (!name || !studentPhone || !guardianPhone || !governorate || !password || password.length < 6 || !validGrade || !validTerm || !validEmail) {
+    return res.status(400).json({ message: 'الاسم ورقم هاتف الطالب ورقم ولي الأمر والمحافظة وكلمة المرور مطلوبة، والبريد الإلكتروني إن أُدخل يجب أن يكون صحيحًا' });
+  }
+  if (studentNumber && users.some((item) => item.studentNumber === String(studentNumber).trim())) {
+    return res.status(409).json({ message: 'رقم الطالب مستخدم بالفعل' });
   }
   if (normalizedEmail && users.some((item) => String(item.email || '').toLowerCase() === normalizedEmail)) {
     return res.status(409).json({ message: 'البريد الإلكتروني مستخدم بالفعل' });
   }
-  if (users.some((item) => item.studentNumber === String(studentNumber).trim())) {
-    return res.status(409).json({ message: 'رقم الطالب مستخدم بالفعل' });
-  }
-
   const user = {
     id: Math.max(...users.map((item) => item.id)) + 1,
     name: String(name).trim(),
     ...(normalizedEmail ? { email: normalizedEmail } : {}),
     grade,
     term: term || '',
-    studentNumber: String(studentNumber).trim(),
+    studentNumber: String(studentNumber || '').trim(),
     phone: String(studentPhone).trim(),
     guardianPhone: String(guardianPhone).trim(),
     governorate: String(governorate).trim(),
@@ -1100,14 +1166,19 @@ app.get('/api/dashboard', authenticate, async (req, res) => {
   const studentVideos = videoCatalog.filter((video) => video.grade === (currentUser.grade || 'second-secondary') && (currentUser.grade === 'first-secondary' || !video.term || video.term === (currentUser.term || '')));
   const videos = studentVideos.map((video) => {
     const key = packageKey(video.grade, video.term, video.unitId);
+    const paid = Boolean(currentUser.contentUnlocked || currentUser.contentAccess?.all
+      || currentUser.contentAccess?.packages?.includes(key)
+      || currentUser.contentAccess?.videoIds?.includes(video.id)
+      || videoPurchases.some((purchase) => purchase.videoId === video.id && purchase.studentId === currentUser.id));
     const open = studentCanAccessVideo(currentUser, video);
-    return { ...video, url: open ? video.url : '', packageKey: key, packagePurchased: currentUser.contentAccess?.packages?.includes(key), purchased: open, locked: !open };
+    return { ...video, url: open ? video.url : '', packageKey: key, packagePurchased: currentUser.contentAccess?.packages?.includes(key), purchased: paid, locked: !paid };
   });
   const studentVideoMap = new Map(videos.map((video) => [video.id, video]));
   const studentLessons = (await getLessonSummaries((lesson) => lesson.grade === (currentUser.grade || 'second-secondary')
     && (currentUser.grade === 'first-secondary' || !lesson.term || lesson.term === (currentUser.term || ''))))
     .map((lesson) => ({
       ...lesson,
+      requiredQuizCompleted: !lesson.requiredQuizId || studentCompletedQuiz(currentUser.id, lesson.requiredQuizId),
       videos: lesson.videos.map((video) => studentVideoMap.get(video.id)).filter(Boolean),
       pdfs: lesson.videos.some((video) => studentCanAccessVideo(currentUser, video))
         ? lesson.pdfs
@@ -1230,10 +1301,18 @@ app.post('/api/admin/videos', authenticate, requireAdmin, async (req, res) => {
 app.patch('/api/admin/lessons/:id', authenticate, requireAdmin, async (req, res) => {
   const lesson = lessonCatalog.find((item) => item.id === Number(req.params.id));
   const title = String(req.body.title || '').trim();
+  const hasRequiredQuizId = Object.prototype.hasOwnProperty.call(req.body, 'requiredQuizId');
+  const requiredQuizId = hasRequiredQuizId ? String(req.body.requiredQuizId || '').trim() : lesson?.requiredQuizId || '';
   if (!lesson) return res.status(404).json({ message: 'المحاضرة غير موجودة' });
   if (!title) return res.status(400).json({ message: 'اسم المحاضرة مطلوب' });
+  const requiredQuiz = quizzes.find((quiz) => String(quiz.id) === requiredQuizId);
+  if (requiredQuizId && (!requiredQuiz || !requiredQuiz.published || requiredQuiz.grade !== lesson.grade
+    || (lesson.grade === 'first-secondary' && requiredQuiz.term !== lesson.term))) {
+    return res.status(400).json({ message: 'اختر اختبارًا منشورًا ومتاحًا لصف المحاضرة وترمها' });
+  }
   lesson.title = title;
-  if (mongoReady) await Lesson.updateOne({ id: lesson.id }, { $set: { title } });
+  lesson.requiredQuizId = requiredQuizId;
+  if (mongoReady) await Lesson.updateOne({ id: lesson.id }, { $set: { title, requiredQuizId } });
   res.json({ lesson, lessons: await getLessonSummaries() });
 });
 
@@ -1686,14 +1765,21 @@ app.patch('/api/admin/quizzes/:id', authenticate, requireAdmin, async (req, res)
 
 app.delete('/api/admin/quizzes/:id', authenticate, requireAdmin, async (req, res) => {
   requireMongo(res);
-  const index = quizzes.findIndex((quiz) => String(quiz.id) === String(req.params.id));
+  const deletedQuizId = String(req.params.id);
+  const index = quizzes.findIndex((quiz) => String(quiz.id) === deletedQuizId);
   if (index === -1) return res.status(404).json({ message: 'الاختبار غير موجود' });
   quizzes.splice(index, 1);
   try {
     const deleteFilter = /^[a-f\d]{24}$/i.test(req.params.id)
       ? { _id: req.params.id }
       : { id: String(req.params.id) };
-    await Quiz.deleteOne(deleteFilter);
+    lessonCatalog.forEach((lesson) => {
+      if (String(lesson.requiredQuizId || '') === deletedQuizId) lesson.requiredQuizId = '';
+    });
+    if (mongoReady) {
+      await Quiz.deleteOne(deleteFilter);
+      await Lesson.updateMany({ requiredQuizId: deletedQuizId }, { $set: { requiredQuizId: '' } });
+    }
   } catch (error) {
     return res.status(500).json({ message: 'تعذر حذف الاختبار من قاعدة البيانات' });
   }
@@ -1717,7 +1803,14 @@ app.post('/api/quizzes/:id/purchase', authenticate, (req, res) => {
 app.post('/api/quizzes/:id/submit', authenticate, async (req, res) => {
   const quiz = quizzes.find((item) => String(item.id) === String(req.params.id) && item.published);
   if (!quiz) return res.status(404).json({ message: 'الاختبار غير موجود' });
-  if (quiz.price > 0 && !quizPurchases.some((purchase) => purchase.quizId === quiz.id && purchase.studentId === req.user.id)) return res.status(402).json({ message: 'يجب شراء الاختبار قبل البدء' });
+  const student = users.find((item) => item.id === req.user.id);
+  const quizPackageKey = packageKey(quiz.grade, quiz.term, quiz.unitId);
+  const quizAvailable = quiz.price === 0
+    || quizPurchases.some((purchase) => purchase.quizId === quiz.id && purchase.studentId === req.user.id)
+    || student?.contentUnlocked
+    || student?.contentAccess?.all
+    || student?.contentAccess?.packages?.includes(quizPackageKey);
+  if (!quizAvailable) return res.status(402).json({ message: 'يجب شراء الاختبار أو الوحدة قبل البدء' });
   const answers = Array.isArray(req.body.answers) ? req.body.answers : [];
   const essayQuestions = quiz.questions.filter((question) => question.type === 'essay');
   const objectiveQuestions = quiz.questions.filter((question) => question.type !== 'essay');

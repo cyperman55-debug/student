@@ -1383,6 +1383,61 @@ p {
   gap: 16px;
 }
 
+.unit-management-section {
+  display: grid;
+  gap: 18px;
+}
+
+.unit-management-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
+  gap: 16px;
+}
+
+.unit-management-card {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.unit-cover-preview {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #edf2f5;
+  color: var(--muted);
+}
+
+.unit-cover-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.unit-visibility-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text);
+}
+
+.unit-visibility-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary-strong);
+}
+
+.unit-management-card > button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .admin-lecture-shell,
 .admin-quiz-shell {
   display: grid;
@@ -3135,6 +3190,10 @@ animation: robot-idle 6s ease-in-out infinite, robot-step-in 720ms cubic-bezier(
   box-shadow: 0 12px 26px rgba(31, 62, 90, 0.1);
 }
 
+.unit-lesson-card.quiz-gated {
+  border-color: #e8c879;
+}
+
 .unit-lesson-link {
   display: grid;
   width: 100%;
@@ -3149,6 +3208,29 @@ animation: robot-idle 6s ease-in-out infinite, robot-step-in 720ms cubic-bezier(
   cursor: pointer;
   opacity: 1;
   visibility: visible;
+}
+
+.unit-lesson-link:disabled {
+  cursor: not-allowed;
+}
+
+.unit-lesson-gate-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid #f0dfb8;
+  background: #fff9e9;
+  color: #59451d;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 640px) {
+  .unit-lesson-gate-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .unit-lesson-card:hover,
@@ -3262,6 +3344,39 @@ animation: robot-idle 6s ease-in-out infinite, robot-step-in 720ms cubic-bezier(
 .lesson-detail-main {
   display: grid;
   gap: 24px;
+}
+
+.lesson-required-quiz-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  border: 1px solid #e8c879;
+  border-radius: 8px;
+  background: #fff9e9;
+  color: #59451d;
+}
+
+.lesson-required-quiz-notice h2,
+.lesson-required-quiz-notice p {
+  margin: 0;
+}
+
+.lesson-required-quiz-notice h2 {
+  margin-bottom: 5px;
+  font-size: 1.05rem;
+}
+
+.lesson-required-quiz-notice p {
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .lesson-required-quiz-notice {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .unit-lesson-heading {

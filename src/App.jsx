@@ -481,7 +481,6 @@ function App() {
   const [showPassword, setShowPassword] = useState(false);
   const [registerMode, setRegisterMode] = useState(false);
   const [fullName, setFullName] = useState('');
-  const [studentNumber, setStudentNumber] = useState('');
   const [studentPhone, setStudentPhone] = useState('');
   const [guardianPhone, setGuardianPhone] = useState('');
   const [registrationGovernorate, setRegistrationGovernorate] = useState('');
@@ -490,6 +489,9 @@ function App() {
   const [user, setUser] = useState(null);
   const [dashboard, setDashboard] = useState(null);
   const [publicStageUnits, setPublicStageUnits] = useState(publicStages);
+  const [unitSettings, setUnitSettings] = useState(secondSecondaryUnits.map((unit) => ({ unitId: unit.id, title: unit.label, image: '', visible: true })));
+  const [unitSettingsMessage, setUnitSettingsMessage] = useState('');
+  const [savingUnitId, setSavingUnitId] = useState(null);
   const [publicQuizLeaders, setPublicQuizLeaders] = useState([]);
   const [authLoading, setAuthLoading] = useState(Boolean(localStorage.getItem(SESSION_TOKEN_KEY)));
   const [error, setError] = useState('');
@@ -535,6 +537,7 @@ function App() {
   const [selectedAdminLessonId, setSelectedAdminLessonId] = useState(null);
   const [lectureManagementView, setLectureManagementView] = useState('list');
   const [editingLessonTitle, setEditingLessonTitle] = useState('');
+  const [editingRequiredQuizId, setEditingRequiredQuizId] = useState('');
   const [selectedAdminQuizId, setSelectedAdminQuizId] = useState(null);
   const [publicStudents, setPublicStudents] = useState([]);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -637,7 +640,10 @@ function App() {
 
   useEffect(() => {
     const lesson = dashboard?.lessons?.find((item) => String(item.id) === String(selectedAdminLessonId));
-    if (lesson) setEditingLessonTitle(lesson.title);
+    if (lesson) {
+      setEditingLessonTitle(lesson.title);
+      setEditingRequiredQuizId(String(lesson.requiredQuizId || ''));
+    }
   }, [dashboard?.lessons, selectedAdminLessonId]);
 
   useEffect(() => {
@@ -709,6 +715,62 @@ function App() {
     return response.json();
   };
 
+  const loadUnitSettings = async () => {
+    try {
+      const response = await fetch(`${API_URL}/admin/units`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await readApiResponse(response);
+      if (!response.ok) throw new Error(data.message || 'تعذر تحميل الوحدات');
+      setUnitSettings(data.units || []);
+      setUnitSettingsMessage('');
+    } catch (err) {
+      setUnitSettingsMessage(err.message || 'تعذر تحميل الوحدات');
+    }
+  };
+
+  const saveUnitSettings = async (event, setting) => {
+    event.preventDefault();
+    setSavingUnitId(setting.unitId);
+    setUnitSettingsMessage('');
+    try {
+      const response = await fetch(`${API_URL}/admin/units/${setting.unitId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ title: setting.title, image: setting.image, visible: setting.visible }),
+      });
+      const data = await readApiResponse(response);
+      if (!response.ok) throw new Error(data.message || 'تعذر حفظ إعدادات الوحدة');
+      setUnitSettings((current) => current.map((item) => item.unitId === setting.unitId ? data.unit : item));
+      setUnitSettingsMessage(data.message || 'تم حفظ إعدادات الوحدة');
+    } catch (err) {
+      setUnitSettingsMessage(err.message || 'تعذر حفظ إعدادات الوحدة');
+    } finally {
+      setSavingUnitId(null);
+    }
+  };
+
+  const handleUnitImageUpload = (event, unitId) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) {
+      setUnitSettingsMessage('اختر صورة بصيغة PNG أو JPG أو WEBP أو GIF');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setUnitSettingsMessage('حجم صورة الغلاف يجب ألا يتجاوز 2 ميجابايت');
+      event.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = String(reader.result || '');
+      setUnitSettings((current) => current.map((item) => item.unitId === unitId ? { ...item, image } : item));
+      setUnitSettingsMessage('');
+    };
+    reader.onerror = () => setUnitSettingsMessage('تعذر قراءة الصورة');
+    reader.readAsDataURL(file);
+  };
+
   const loadChatMessages = async () => {
     const response = await fetch(`${API_URL}/chat/messages`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -771,7 +833,7 @@ function App() {
     fetch(`${API_URL}/public/units/second-secondary`, { signal: controller.signal })
       .then(readApiResponse)
       .then((data) => {
-        if (Array.isArray(data.units) && data.units.length) {
+        if (Array.isArray(data.units)) {
           setPublicStageUnits(data.units.map((unit) => ({ ...unit, subtitle: publicStages[0].subtitle })));
         }
       })
@@ -1470,6 +1532,11 @@ function App() {
     if (!response.ok) { setError(data.message || 'تعذر تصحيح الاختبار'); return; }
     setQuizResult(data.attempt);
     setQuizCorrections(data.corrections || []);
+    try {
+      setDashboard(await fetchDashboard(token));
+    } catch (err) {
+      setError(err.message || 'تعذر تحديث حالة المحاضرات');
+    }
   };
 
   const handleLogin = async (event) => {
@@ -1482,7 +1549,7 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(registerMode
-          ? { name: fullName, email, studentNumber, studentPhone, guardianPhone, governorate: registrationGovernorate, password, grade: registrationGrade, term: '' }
+          ? { name: fullName, email, studentPhone, guardianPhone, governorate: registrationGovernorate, password, grade: registrationGrade, term: '' }
           : { phone: loginPhone, password }),
       });
 
@@ -1794,7 +1861,7 @@ function App() {
       const response = await fetch(`${API_URL}/admin/lessons/${selectedAdminLesson.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ title: editingLessonTitle.trim() }),
+        body: JSON.stringify({ title: editingLessonTitle.trim(), requiredQuizId: editingRequiredQuizId }),
       });
       const data = await readApiResponse(response);
       if (!response.ok) throw new Error(data.message || 'تعذر تعديل اسم المحاضرة');
@@ -2254,10 +2321,6 @@ function App() {
                     <input type="text" value={fullName} onChange={(event) => setFullName(event.target.value)} required />
                   </label>
                   <label>
-                    رقم الطالب
-                    <input type="text" value={studentNumber} onChange={(event) => setStudentNumber(event.target.value)} required />
-                  </label>
-                  <label>
                     رقم هاتف الطالب
                     <input type="tel" inputMode="tel" autoComplete="tel" dir="ltr" placeholder="010xxxxxxxx" value={studentPhone} onChange={(event) => setStudentPhone(event.target.value)} required />
                   </label>
@@ -2434,6 +2497,7 @@ function App() {
     if (selectedPackage && selectedLesson) {
       const lessonIndex = selectedPackage.lessons.findIndex((lesson) => String(lesson.id) === String(selectedLesson.id));
       const lessonQuizzes = selectedPackage.quizzes.filter((quiz) => String(quiz.lessonId || '') === String(selectedLesson.id));
+      const requiredQuiz = (dashboard?.quizzes || []).find((quiz) => String(quiz.id) === String(selectedLesson.requiredQuizId || ''));
       const unitTitle = selectedPackage.grade === 'first-secondary'
         ? selectedPackage.term === 'first-term' ? 'أولى ثانوي - الترم الأول' : 'أولى ثانوي - الترم الثاني'
         : `تانية ثانوي - الوحدة ${selectedPackage.unitId}`;
@@ -2455,7 +2519,13 @@ function App() {
           </header>
 
           <main className="unit-detail-main lesson-detail-main">
-            {getOrderedLessonResources(selectedLesson).map((resource) => resource.type === 'pdf' ? (
+            {selectedLesson.requiredQuizId && !selectedLesson.requiredQuizCompleted && <section className="lesson-required-quiz-notice" role="status">
+              <div><h2>المحاضرة مقفولة</h2><p>{requiredQuiz ? `أكمل اختبار «${requiredQuiz.title}» وأرسل إجاباتك لفتح محتوى المحاضرة.` : 'أكمل الاختبار المطلوب وأرسل إجاباتك لفتح محتوى المحاضرة.'}</p></div>
+              {requiredQuiz && <button type="button" className="primary-btn" onClick={() => startQuiz(requiredQuiz.id)} disabled={loading}>
+                {requiredQuiz.purchased ? 'ابدأ الاختبار المطلوب' : 'شراء الاختبار وبدؤه'}
+              </button>}
+            </section>}
+            {(!selectedLesson.requiredQuizId || selectedLesson.requiredQuizCompleted) && getOrderedLessonResources(selectedLesson).map((resource) => resource.type === 'pdf' ? (
               <section className="unit-lesson-resource" key={`pdf-${resource.id}`}>
                 <div className="unit-resource-heading">
                   <div><span className="unit-resource-type">ملف شرح PDF {selectedLesson.pdfs.length > 1 ? `${selectedLesson.pdfs.findIndex((pdf) => pdf.id === resource.id) + 1}` : ''}</span><h4>{resource.pdf.name}</h4></div>
@@ -2571,8 +2641,8 @@ function App() {
                 </div>
                 <div className="unit-lesson-list">
                   {selectedPackage.lessons.map((lesson, index) => (
-                    <article className="unit-lesson-card" key={lesson.id}>
-                      <button type="button" className="unit-lesson-link" onClick={() => { setSelectedLessonVideoId(lesson.id); setPlayingLessonVideoId(null); closeLessonPdf(); }}>
+                    <article className={`unit-lesson-card ${lesson.requiredQuizId && !lesson.requiredQuizCompleted ? 'quiz-gated' : ''}`} key={lesson.id}>
+                      <button type="button" className="unit-lesson-link" disabled={Boolean(lesson.requiredQuizId && !lesson.requiredQuizCompleted)} onClick={() => { setSelectedLessonVideoId(lesson.id); setPlayingLessonVideoId(null); closeLessonPdf(); }}>
                         <span className="unit-lesson-thumbnail">
                           {lesson.videos[0]?.cover ? <img src={lesson.videos[0].cover} alt="" /> : <span className="unit-lesson-thumbnail-placeholder" aria-hidden="true">▶</span>}
                           <span className="unit-lesson-thumbnail-shade" aria-hidden="true" />
@@ -2588,8 +2658,12 @@ function App() {
                             {selectedPackage.quizzes.some((quiz) => String(quiz.lessonId || '') === String(lesson.id)) && <span>اختبار</span>}
                           </span>
                         </span>
-                        <span className="unit-lesson-open-label">فتح المحاضرة <span aria-hidden="true">←</span></span>
+                        <span className="unit-lesson-open-label">{lesson.requiredQuizId && !lesson.requiredQuizCompleted ? 'أكمل الاختبار لفتح المحاضرة' : 'فتح المحاضرة'} <span aria-hidden="true">←</span></span>
                       </button>
+                      {lesson.requiredQuizId && !lesson.requiredQuizCompleted && <div className="unit-lesson-gate-actions">
+                        <span>هذه المحاضرة تتطلب إكمال اختبار محدد.</span>
+                        {(dashboard?.quizzes || []).some((quiz) => String(quiz.id) === String(lesson.requiredQuizId)) && <button type="button" className="primary-btn small-btn" onClick={() => startQuiz(lesson.requiredQuizId)} disabled={loading}>ابدأ الاختبار المطلوب</button>}
+                      </div>}
                     </article>
                   ))}
                 </div>
@@ -2847,6 +2921,7 @@ function App() {
         <div className="logo">مهندس محمد عبد الشافي</div>
         <nav>
           <button type="button" className={`nav-item ${adminSection === 'overview' ? 'active' : ''}`} onClick={() => setAdminSection('overview')}>نظرة عامة</button>
+          <button type="button" className={`nav-item ${adminSection === 'units' ? 'active' : ''}`} onClick={() => { setAdminSection('units'); loadUnitSettings(); }}>الوحدات</button>
           <button type="button" className={`nav-item ${adminSection === 'videos' ? 'active' : ''}`} onClick={() => { setAdminSection('videos'); setLectureManagementView('list'); }}>المحاضرات</button>
           <button type="button" className={`nav-item ${adminSection === 'lesson-files' ? 'active' : ''}`} onClick={() => setAdminSection('lesson-files')}>ملفات الشرح</button>
           <button type="button" className={`nav-item ${adminSection === 'students' ? 'active' : ''}`} onClick={() => setAdminSection('students')}>الطلاب</button>
@@ -2872,6 +2947,29 @@ function App() {
 
         {dashboard && (
           <>
+            {adminSection === 'units' && <section className="unit-management-section">
+              <div className="section-heading"><span className="eyebrow">محتوى الصفحة الرئيسية</span><h2>إدارة الوحدات</h2><p>تحكم في اسم كل وحدة وصورة غلافها وظهورها للزوار.</p></div>
+              <div className="unit-management-grid">
+                {unitSettings.map((setting) => <form key={setting.unitId} className="unit-management-card" onSubmit={(event) => saveUnitSettings(event, setting)}>
+                  <div className="unit-cover-preview">
+                    {setting.image ? <img src={setting.image} alt={`غلاف ${setting.title}`} /> : <span>لا توجد صورة غلاف</span>}
+                  </div>
+                  <label className="management-field">اسم الوحدة
+                    <input type="text" maxLength={100} value={setting.title} onChange={(event) => setUnitSettings((current) => current.map((item) => item.unitId === setting.unitId ? { ...item, title: event.target.value } : item))} required />
+                  </label>
+                  <label className="management-field">رابط صورة الغلاف
+                    <input type="url" dir="ltr" value={setting.image.startsWith('data:image/') ? '' : setting.image} onChange={(event) => setUnitSettings((current) => current.map((item) => item.unitId === setting.unitId ? { ...item, image: event.target.value } : item))} placeholder="https://..." />
+                  </label>
+                  <label className="management-field">رفع صورة من الجهاز
+                    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => handleUnitImageUpload(event, setting.unitId)} />
+                  </label>
+                  <label className="unit-visibility-toggle"><input type="checkbox" checked={setting.visible} onChange={(event) => setUnitSettings((current) => current.map((item) => item.unitId === setting.unitId ? { ...item, visible: event.target.checked } : item))} /><span>إظهار الوحدة في الصفحة الرئيسية</span></label>
+                  <button type="submit" className="primary-btn" disabled={savingUnitId === setting.unitId}>{savingUnitId === setting.unitId ? 'جاري الحفظ...' : 'حفظ الإعدادات'}</button>
+                </form>)}
+              </div>
+              {unitSettingsMessage && <div className="message" role="status">{unitSettingsMessage}</div>}
+            </section>}
+
             {adminSection === 'payments' && <section className="admin-payments-section">
               <div className="section-heading"><span className="eyebrow">Vodafone Cash</span><h2>طلبات الدفع</h2></div>
               <div className="payment-requests-list">
@@ -3189,6 +3287,13 @@ function App() {
                         <label className="management-field">
                           <span className="admin-field-label">اسم المحاضرة</span>
                           <input value={editingLessonTitle} onChange={(event) => setEditingLessonTitle(event.target.value)} aria-label="اسم المحاضرة" />
+                        </label>
+                        <label className="management-field">
+                          <span className="admin-field-label">اختبار مطلوب قبل فتح المحاضرة</span>
+                          <select value={editingRequiredQuizId} onChange={(event) => setEditingRequiredQuizId(event.target.value)}>
+                            <option value="">لا يوجد اختبار مطلوب</option>
+                            {quizList.map((quiz) => <option key={quiz.id} value={String(quiz.id)}>{quiz.title}</option>)}
+                          </select>
                         </label>
                         <button type="button" className="primary-btn small-btn" onClick={saveLessonTitle}>حفظ اسم المحاضرة</button>
                       </div>
