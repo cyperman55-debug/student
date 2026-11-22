@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import heroImage from './hero.webp';
 
-const cloudflareApiUrl = 'https://student-puce-one.vercel.app/api';
+const cloudflareApiUrl = 'https://student-roitosi.vercel.app/api';
 const usesSameOriginApi = typeof window === 'undefined'
   || ['localhost', '127.0.0.1'].includes(window.location.hostname)
   || window.location.hostname.endsWith('.vercel.app');
