@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import heroImage from '../WhatsApp Image 2026-09-30 at 4.14.49 AM.jpeg';
+import heroImage from './hero.webp';
 
 const cloudflareApiUrl = 'https://student-puce-one.vercel.app/api';
 const usesSameOriginApi = typeof window === 'undefined'
@@ -594,6 +594,7 @@ function App() {
   const [paymentSettings, setPaymentSettings] = useState(null);
   const [rechargeRequests, setRechargeRequests] = useState([]);
   const [rechargeAmount, setRechargeAmount] = useState('');
+  const [rechargeTransactionRef, setRechargeTransactionRef] = useState('');
   const [senderPhone, setSenderPhone] = useState('');
   const [rechargeNotes, setRechargeNotes] = useState('');
   const [rechargeMessage, setRechargeMessage] = useState('');
@@ -605,6 +606,8 @@ function App() {
   const protectedVideoRef = useRef(null);
   const lessonPdfObjectUrlRef = useRef(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [profileEmail, setProfileEmail] = useState('');
+  const [privacyOpen, setPrivacyOpen] = useState(false);
   const [profileName, setProfileName] = useState('');
   const [profilePhone, setProfilePhone] = useState('');
   const [profileGuardianPhone, setProfileGuardianPhone] = useState('');
@@ -675,6 +678,58 @@ function App() {
   const scrollToLogin = () => {
     setLoginOpen(true);
   };
+
+  // Modal accessibility: close on Escape, trap Tab focus inside the open
+  // modal, move focus into it on open and restore it on close.
+  const openModalKind = privacyOpen ? 'privacy'
+    : loginOpen ? 'login'
+    : paymentOpen ? 'payment'
+    : profileOpen ? 'profile'
+    : chatOpen ? 'chat'
+    : selectedQuiz ? 'quiz'
+    : null;
+  useEffect(() => {
+    if (!openModalKind) return undefined;
+    const previouslyFocused = document.activeElement;
+    const dialogs = document.querySelectorAll('.login-modal, .payment-modal, .profile-modal, .chat-modal, .quiz-modal');
+    const dialog = dialogs[dialogs.length - 1];
+    if (dialog) {
+      const focusTarget = dialog.querySelector('input:not([disabled]), select:not([disabled]), textarea, button:not([disabled])');
+      (focusTarget || dialog).focus();
+    }
+    const closeCurrentModal = () => {
+      if (openModalKind === 'privacy') setPrivacyOpen(false);
+      else if (openModalKind === 'login') setLoginOpen(false);
+      else if (openModalKind === 'payment') setPaymentOpen(false);
+      else if (openModalKind === 'profile') setProfileOpen(false);
+      else if (openModalKind === 'chat') setChatOpen(false);
+      else if (openModalKind === 'quiz') setSelectedQuiz(null);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        closeCurrentModal();
+        return;
+      }
+      if (event.key === 'Tab' && dialog) {
+        const focusable = dialog.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+      if (previouslyFocused && typeof previouslyFocused.focus === 'function') previouslyFocused.focus();
+    };
+  }, [openModalKind]);
 
   const handleHeroPointerMove = (event) => {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -1419,12 +1474,12 @@ function App() {
     const response = await fetch(`${API_URL}/recharge-requests`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ amount: rechargeAmount, senderPhone, notes: rechargeNotes }),
+      body: JSON.stringify({ amount: rechargeAmount, senderPhone, notes: rechargeNotes, transactionReference: rechargeTransactionRef }),
     });
     const data = await readApiResponse(response);
     if (!response.ok) { setRechargeMessage(data.message || 'تعذر إرسال طلب الشحن'); return; }
     setRechargeRequests((current) => [data.request, ...current]);
-    setRechargeAmount(''); setSenderPhone(''); setRechargeNotes('');
+    setRechargeAmount(''); setSenderPhone(''); setRechargeNotes(''); setRechargeTransactionRef('');
     setRechargeMessage(data.message || 'تم إرسال طلب الشحن بنجاح');
   };
 
@@ -1475,6 +1530,7 @@ function App() {
 
   const openProfile = () => {
     setProfileName(user?.name || '');
+    setProfileEmail(user?.email || '');
     setProfilePhone(user?.phone || '');
     setProfileGuardianPhone(user?.guardianPhone || '');
     setProfileAvatar(user?.avatar || '');
@@ -1501,7 +1557,7 @@ function App() {
       const response = await fetch(`${API_URL}/profile`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: profileName, phone: profilePhone, guardianPhone: profileGuardianPhone, avatar: profileAvatar }),
+        body: JSON.stringify({ name: profileName, email: profileEmail, phone: profilePhone, guardianPhone: profileGuardianPhone, avatar: profileAvatar }),
       });
       const data = await readApiResponse(response);
       if (!response.ok) throw new Error(data.message || 'تعذر تحديث الملف الشخصي');
@@ -2310,8 +2366,8 @@ function App() {
           </section>
 
           {loginOpen && <div className="login-modal-backdrop" onClick={() => setLoginOpen(false)}>
-            <div className="auth-card public-login-box login-modal" onClick={(event) => event.stopPropagation()}>
-              <button type="button" className="modal-close" onClick={() => setLoginOpen(false)}>×</button>
+            <div className="auth-card public-login-box login-modal" role="dialog" aria-modal="true" aria-label={registerMode ? 'إنشاء حساب طالب' : 'تسجيل الدخول'} onClick={(event) => event.stopPropagation()}>
+              <button type="button" className="modal-close" aria-label="إغلاق النافذة" onClick={() => setLoginOpen(false)}>×</button>
               <h3>{registerMode ? 'إنشاء حساب طالب' : 'تسجيل الدخول'}</h3>
             <form onSubmit={handleLogin} className="auth-form">
               {registerMode && (
@@ -2322,11 +2378,11 @@ function App() {
                   </label>
                   <label>
                     رقم هاتف الطالب
-                    <input type="tel" inputMode="tel" autoComplete="tel" dir="ltr" placeholder="010xxxxxxxx" value={studentPhone} onChange={(event) => setStudentPhone(event.target.value)} required />
+                    <input type="tel" inputMode="numeric" autoComplete="tel" dir="ltr" placeholder="010xxxxxxxx" pattern="01[0-9]{9}" minLength={11} maxLength={11} title="رقم مصري مكون من 11 رقمًا يبدأ بـ 01" value={studentPhone} onChange={(event) => setStudentPhone(event.target.value)} required />
                   </label>
                   <label>
                     رقم ولي الأمر
-                    <input type="tel" value={guardianPhone} onChange={(event) => setGuardianPhone(event.target.value)} required />
+                    <input type="tel" inputMode="numeric" autoComplete="tel" dir="ltr" placeholder="010xxxxxxxx" pattern="01[0-9]{9}" minLength={11} maxLength={11} title="رقم مصري مكون من 11 رقمًا يبدأ بـ 01" value={guardianPhone} onChange={(event) => setGuardianPhone(event.target.value)} required />
                   </label>
                   <label>
                     المحافظة
@@ -2362,6 +2418,8 @@ function App() {
                 <span className="password-field">
                   <input
                     type={showPassword ? 'text' : 'password'}
+                    autoComplete={registerMode ? 'new-password' : 'current-password'}
+                    minLength={6}
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     required
@@ -2380,8 +2438,29 @@ function App() {
               <button type="button" className="secondary-btn auth-switch" onClick={() => { setRegisterMode((current) => !current); setError(''); }}>
                 {registerMode ? 'لديك حساب؟ تسجيل الدخول' : 'إنشاء حساب طالب جديد'}
               </button>
+              {!registerMode && <a className="forgot-password-link" href="https://wa.me/201112004658?text=%D9%86%D8%B3%D9%8A%D8%AA%20%D9%83%D9%84%D9%85%D8%A9%20%D8%A7%D9%84%D9%85%D8%B1%D9%88%D8%B1" target="_blank" rel="noreferrer">نسيت كلمة المرور؟ تواصل مع المدرس لإعادة تعيينها</a>}
+              {registerMode && <p className="auth-privacy-note">بإنشاء الحساب أنت توافق على <button type="button" className="link-btn" onClick={() => setPrivacyOpen(true)}>سياسة الخصوصية وشروط الاستخدام</button></p>}
             </form>
             </div>
+          </div>}
+
+          <footer className="landing-footer">
+            <button type="button" className="link-btn" onClick={() => setPrivacyOpen(true)}>سياسة الخصوصية وشروط الاستخدام</button>
+          </footer>
+
+          {privacyOpen && <div className="profile-modal-backdrop" onClick={() => setPrivacyOpen(false)}>
+            <section className="profile-modal privacy-modal" role="dialog" aria-modal="true" aria-label="سياسة الخصوصية وشروط الاستخدام" onClick={(event) => event.stopPropagation()}>
+              <button type="button" className="modal-close" aria-label="إغلاق النافذة" onClick={() => setPrivacyOpen(false)}>×</button>
+              <span className="eyebrow">خصوصيتك تهمنا</span>
+              <h2>سياسة الخصوصية وشروط الاستخدام</h2>
+              <div className="privacy-content">
+                <p>عند إنشاء حساب في منصة مهندس محمد عبد الشافي نجمع البيانات التالية: اسم الطالب، رقم هاتف الطالب، رقم هاتف ولي الأمر، المحافظة، الصف الدراسي، والبريد الإلكتروني (اختياري).</p>
+                <p>نستخدم هذه البيانات فقط لتشغيل حسابك على المنصة: تسجيل الدخول، فتح المحتوى الدراسي، متابعة شحن الرصيد والمدفوعات، والتواصل بخصوص الحساب عند الحاجة.</p>
+                <p>كلمات المرور تُحفظ مشفّرة ولا يمكن لأحد الاطلاع عليها. لا نبيع بياناتك ولا نشاركها مع أي طرف ثالث لأغراض تسويقية.</p>
+                <p>يمكنك تعديل بياناتك من صفحة «ملفي الشخصي» في أي وقت. ولطلب حذف الحساب أو بياناته نهائيًا، تواصل معنا عبر <a href="https://wa.me/201112004658" target="_blank" rel="noreferrer">واتساب</a>.</p>
+                <p>باستخدامك المنصة أنت توافق على استخدامها لأغراض تعليمية فقط، وعلى عدم مشاركة حسابك أو المحتوى المدفوع مع الآخرين.</p>
+              </div>
+            </section>
           </div>}
 
         </main>
@@ -2689,20 +2768,25 @@ function App() {
             </>}
           </main>
           {paymentOpen && <div className="payment-modal-backdrop" onClick={() => setPaymentOpen(false)}>
-            <section className="payment-modal" onClick={(event) => event.stopPropagation()}>
-              <button type="button" className="modal-close" onClick={() => setPaymentOpen(false)}>×</button>
+            <section className="payment-modal" role="dialog" aria-modal="true" aria-label="شحن رصيد الطالب" onClick={(event) => event.stopPropagation()}>
+              <button type="button" className="modal-close" aria-label="إغلاق النافذة" onClick={() => setPaymentOpen(false)}>×</button>
               <span className="eyebrow">شحن رصيد الطالب</span>
               <h2>الدفع عبر Vodafone Cash</h2>
               {paymentNotice && <p className="payment-notice" role="status">{paymentNotice}</p>}
               <div className="payment-account-summary"><strong>{user?.name}</strong><span>{user?.email}</span><span>رقم الطالب: {user?.studentNumber || 'مسجل بالحساب'}</span></div>
-              <div className="vodafone-number"><span>حوّل إلى الرقم</span><strong>{paymentSettings?.vodafoneCashNumber || 'جارٍ تحميل رقم الدفع...'}</strong></div>
+              {!paymentSettings
+                ? <div className="vodafone-number"><span>حوّل إلى الرقم</span><strong>جارٍ تحميل رقم الدفع...</strong></div>
+                : paymentSettings.vodafoneCashNumber
+                  ? <div className="vodafone-number"><span>حوّل إلى الرقم</span><strong dir="ltr">{paymentSettings.vodafoneCashNumber}</strong></div>
+                  : <div className="vodafone-number vodafone-number-missing"><strong>رقم التحويل غير متاح حاليًا. تواصل مع المدرس على <a href="https://wa.me/201112004658" target="_blank" rel="noreferrer">واتساب</a> لمعرفة الرقم.</strong></div>}
               {paymentSettings?.instructions && <p className="payment-instructions">{paymentSettings.instructions}</p>}
               <form className="recharge-form" onSubmit={submitRechargeRequest}>
                 <label className="management-field">المبلغ بالجنيه المصري<input type="number" min={paymentSettings?.minimumAmount || 10} value={rechargeAmount} onChange={(event) => setRechargeAmount(event.target.value)} placeholder="مثال: 100" required /></label>
-                <label className="management-field">رقم الهاتف المحوّل منه<input type="tel" value={senderPhone} onChange={(event) => setSenderPhone(event.target.value)} placeholder="اختياري" /></label>
+                <label className="management-field">رقم العملية<input type="text" inputMode="numeric" dir="ltr" value={rechargeTransactionRef} onChange={(event) => setRechargeTransactionRef(event.target.value)} placeholder="رقم عملية التحويل من فودافون كاش" required /></label>
+                <label className="management-field">رقم الهاتف المحوّل منه<input type="tel" inputMode="numeric" dir="ltr" value={senderPhone} onChange={(event) => setSenderPhone(event.target.value)} placeholder="اختياري" /></label>
                 <label className="management-field">ملاحظات<input value={rechargeNotes} onChange={(event) => setRechargeNotes(event.target.value)} placeholder="اختياري" /></label>
                 {rechargeMessage && <div className="message">{rechargeMessage}</div>}
-                <button type="submit" className="primary-btn">إرسال طلب الشحن</button>
+                <button type="submit" className="primary-btn" disabled={!paymentSettings?.vodafoneCashNumber}>إرسال طلب الشحن</button>
               </form>
               <div className="recharge-history"><h3>طلبات الشحن السابقة</h3>{rechargeRequests.map((request) => <div key={request.id}><strong>مبلغ التحويل: <CurrencyAmount amount={request.amount} /></strong><span>{request.status === 'Pending' ? 'قيد المراجعة' : request.status === 'Approved' ? 'تم الاعتماد' : 'مرفوض'}</span></div>)}{!rechargeRequests.length && <p>لا توجد طلبات سابقة.</p>}</div>
             </section>
@@ -2747,8 +2831,8 @@ function App() {
         </section>
 
         {profileOpen && <div className="profile-modal-backdrop" onClick={() => setProfileOpen(false)}>
-          <section className="profile-modal" onClick={(event) => event.stopPropagation()}>
-            <button type="button" className="modal-close" onClick={() => setProfileOpen(false)}>×</button>
+          <section className="profile-modal" role="dialog" aria-modal="true" aria-label="ملفي الشخصي" onClick={(event) => event.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="إغلاق النافذة" onClick={() => setProfileOpen(false)}>×</button>
             <div className="profile-modal-heading">
               <span className="eyebrow">حساب الطالب</span>
               <h2>ملفي الشخصي</h2>
@@ -2768,7 +2852,7 @@ function App() {
               </label>
               <label className="management-field">
                 البريد الإلكتروني
-                <input value={user.email} disabled />
+                <input type="email" dir="ltr" value={profileEmail} onChange={(event) => setProfileEmail(event.target.value)} placeholder="أضف بريدًا إلكترونيًا (اختياري)" />
               </label>
               <label className="management-field">
                 رقم الطالب
@@ -2776,11 +2860,11 @@ function App() {
               </label>
               <label className="management-field">
                 رقم الهاتف
-                <input type="tel" value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} placeholder="رقم هاتفك" />
+                <input type="tel" inputMode="numeric" dir="ltr" pattern="01[0-9]{9}" minLength={11} maxLength={11} title="رقم مصري مكون من 11 رقمًا يبدأ بـ 01" value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} placeholder="010xxxxxxxx" />
               </label>
               <label className="management-field">
                 رقم ولي الأمر
-                <input type="tel" value={profileGuardianPhone} onChange={(event) => setProfileGuardianPhone(event.target.value)} placeholder="رقم ولي الأمر" />
+                <input type="tel" inputMode="numeric" dir="ltr" pattern="01[0-9]{9}" minLength={11} maxLength={11} title="رقم مصري مكون من 11 رقمًا يبدأ بـ 01" value={profileGuardianPhone} onChange={(event) => setProfileGuardianPhone(event.target.value)} placeholder="010xxxxxxxx" />
               </label>
               {profileMessage && <div className="message">{profileMessage}</div>}
               <button type="submit" className="primary-btn">حفظ الملف الشخصي</button>
@@ -2801,20 +2885,25 @@ function App() {
         </div>
 
         {paymentOpen && <div className="payment-modal-backdrop" onClick={() => setPaymentOpen(false)}>
-          <section className="payment-modal" onClick={(event) => event.stopPropagation()}>
-            <button type="button" className="modal-close" onClick={() => setPaymentOpen(false)}>×</button>
+          <section className="payment-modal" role="dialog" aria-modal="true" aria-label="شحن رصيد الطالب" onClick={(event) => event.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="إغلاق النافذة" onClick={() => setPaymentOpen(false)}>×</button>
             <span className="eyebrow">شحن رصيد الطالب</span>
             <h2>الدفع عبر Vodafone Cash</h2>
             {paymentNotice && <p className="payment-notice" role="status">{paymentNotice}</p>}
             <div className="payment-account-summary"><strong>{user?.name}</strong><span>{user?.email}</span><span>رقم الطالب: {user?.studentNumber || 'مسجل بالحساب'}</span></div>
-            <div className="vodafone-number"><span>حوّل إلى الرقم</span><strong>{paymentSettings?.vodafoneCashNumber}</strong></div>
+            {!paymentSettings
+              ? <div className="vodafone-number"><span>حوّل إلى الرقم</span><strong>جارٍ تحميل رقم الدفع...</strong></div>
+              : paymentSettings.vodafoneCashNumber
+                ? <div className="vodafone-number"><span>حوّل إلى الرقم</span><strong dir="ltr">{paymentSettings.vodafoneCashNumber}</strong></div>
+                : <div className="vodafone-number vodafone-number-missing"><strong>رقم التحويل غير متاح حاليًا. تواصل مع المدرس على <a href="https://wa.me/201112004658" target="_blank" rel="noreferrer">واتساب</a> لمعرفة الرقم.</strong></div>}
             <p className="payment-instructions">{paymentSettings?.instructions}</p>
             <form className="recharge-form" onSubmit={submitRechargeRequest}>
               <label className="management-field">المبلغ بالجنيه المصري<input type="number" min={paymentSettings?.minimumAmount || 10} value={rechargeAmount} onChange={(event) => setRechargeAmount(event.target.value)} placeholder="مثال: 100" required /></label>
-              <label className="management-field">رقم الهاتف المحوّل منه<input type="tel" value={senderPhone} onChange={(event) => setSenderPhone(event.target.value)} placeholder="اختياري" /></label>
+              <label className="management-field">رقم العملية<input type="text" inputMode="numeric" dir="ltr" value={rechargeTransactionRef} onChange={(event) => setRechargeTransactionRef(event.target.value)} placeholder="رقم عملية التحويل من فودافون كاش" required /></label>
+              <label className="management-field">رقم الهاتف المحوّل منه<input type="tel" inputMode="numeric" dir="ltr" value={senderPhone} onChange={(event) => setSenderPhone(event.target.value)} placeholder="اختياري" /></label>
               <label className="management-field">ملاحظات<input value={rechargeNotes} onChange={(event) => setRechargeNotes(event.target.value)} placeholder="اختياري" /></label>
               {rechargeMessage && <div className="message">{rechargeMessage}</div>}
-              <button type="submit" className="primary-btn">إرسال طلب الشحن</button>
+              <button type="submit" className="primary-btn" disabled={!paymentSettings?.vodafoneCashNumber}>إرسال طلب الشحن</button>
             </form>
             <div className="recharge-history"><h3>طلبات الشحن السابقة</h3>{rechargeRequests.map((request) => <div key={request.id}><strong>مبلغ التحويل: <CurrencyAmount amount={request.amount} /></strong><span>{request.status === 'Pending' ? 'قيد المراجعة' : request.status === 'Approved' ? 'تم الاعتماد' : 'مرفوض'}</span></div>)}{!rechargeRequests.length && <p>لا توجد طلبات سابقة.</p>}</div>
           </section>
@@ -2872,13 +2961,13 @@ function App() {
         </section>
 
         {chatOpen && <div className="chat-modal-backdrop" onClick={() => setChatOpen(false)}>
-          <section className="chat-modal" onClick={(event) => event.stopPropagation()}>
+          <section className="chat-modal" role="dialog" aria-modal="true" aria-label="شات المنصة" onClick={(event) => event.stopPropagation()}>
             <div className="chat-modal-header">
               <div>
                 <span className="eyebrow">شات المنصة</span>
                 <h3>مجتمع البرمجة والذكاء الاصطناعي</h3>
               </div>
-              <button type="button" className="modal-close" onClick={() => setChatOpen(false)}>×</button>
+              <button type="button" className="modal-close" aria-label="إغلاق الشات" onClick={() => setChatOpen(false)}>×</button>
             </div>
             <div className="chat-messages">
               {chatMessages.map((message) => (
@@ -2897,8 +2986,8 @@ function App() {
         </div>}
 
         {selectedQuiz && <div className="quiz-modal-backdrop" onClick={() => setSelectedQuiz(null)}>
-          <section className="quiz-modal" onClick={(event) => event.stopPropagation()}>
-            <button type="button" className="modal-close" onClick={() => setSelectedQuiz(null)}>×</button>
+          <section className="quiz-modal" role="dialog" aria-modal="true" aria-label={`اختبار: ${selectedQuiz.title}`} onClick={(event) => event.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="إغلاق الاختبار" onClick={() => setSelectedQuiz(null)}>×</button>
             <span className="eyebrow">اختبار تفاعلي</span>
             <h2>{selectedQuiz.title}</h2>
             <form onSubmit={submitQuiz} className="quiz-form">
@@ -2974,7 +3063,7 @@ function App() {
               <div className="section-heading"><span className="eyebrow">Vodafone Cash</span><h2>طلبات الدفع</h2></div>
               <div className="payment-requests-list">
                 {paymentRequests.map((request) => <article key={request.id} className="payment-request-card">
-                  <div className="payment-request-info"><h3>{request.student}</h3><p><strong>مبلغ التحويل: <CurrencyAmount amount={request.amount} /></strong> • الرصيد الحالي: <CurrencyAmount amount={request.studentBalance ?? 0} /></p>{request.creditedAmount && <p><strong>المبلغ المضاف: <CurrencyAmount amount={request.creditedAmount} /></strong></p>}<small>الإيميل: {request.studentEmail || 'غير مسجل'} • رقم الطالب: {request.studentNumber || 'غير مسجل'} • ولي الأمر: {request.guardianPhone || 'غير مسجل'} • هاتف التحويل: {request.senderPhone || 'غير مسجل'}</small><small>{new Date(request.createdAt).toLocaleString('ar-EG')}</small></div>
+                  <div className="payment-request-info"><h3>{request.student}</h3><p><strong>مبلغ التحويل: <CurrencyAmount amount={request.amount} /></strong> • الرصيد الحالي: <CurrencyAmount amount={request.studentBalance ?? 0} /></p>{request.creditedAmount && <p><strong>المبلغ المضاف: <CurrencyAmount amount={request.creditedAmount} /></strong></p>}<small>الإيميل: {request.studentEmail || 'غير مسجل'} • رقم الطالب: {request.studentNumber || 'غير مسجل'} • ولي الأمر: {request.guardianPhone || 'غير مسجل'} • هاتف التحويل: {request.senderPhone || 'غير مسجل'} • رقم العملية: {request.transactionReference || 'غير مسجل'}</small><small>{new Date(request.createdAt).toLocaleString('ar-EG')}</small></div>
                   <strong className={`request-status ${request.status.toLowerCase()}`}>{request.status === 'Pending' ? 'قيد المراجعة' : request.status === 'Approved' ? 'تم الاعتماد' : 'مرفوض'}</strong>
                   {request.status === 'Pending' && <div className="payment-request-actions"><label className="approval-amount-field">المبلغ الذي سيضاف للرصيد<input type="number" min="1" step="1" value={paymentApprovalAmounts[request.id] ?? request.amount} onChange={(event) => setPaymentApprovalAmounts((current) => ({ ...current, [request.id]: event.target.value }))} /></label><button type="button" className="primary-btn" onClick={() => reviewPaymentRequest(request.id, 'approve')}>اعتماد وإضافة الرصيد</button><button type="button" className="small-btn danger-btn" onClick={() => reviewPaymentRequest(request.id, 'reject')}>رفض</button></div>}
                 </article>)}

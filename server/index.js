@@ -22,6 +22,15 @@ app.use(cors({
   origin: corsOrigins.length ? corsOrigins : true,
   credentials: true,
 }));
+
+// Security headers on API responses (the static frontend gets its own via vercel.json)
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 app.use(express.json({ limit: '5mb' }));
 const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -565,6 +574,18 @@ const quizPurchases = [];
 const videoPurchases = [];
 const rechargeRequests = [];
 const vodafoneCashNumber = String(process.env.VODAFONE_CASH_NUMBER || '').trim();
+if (!vodafoneCashNumber) {
+  console.warn('VODAFONE_CASH_NUMBER is not set; students will not see a transfer number until it is configured in the hosting environment.');
+}
+
+// Egyptian mobile numbers: 11 digits starting with 01 (e.g. 010xxxxxxxx).
+// Accepts Arabic-Indic digits and rejects placeholders like 00000000000.
+const normalizePhoneDigits = (value) => String(value || '')
+  .trim()
+  .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+  .replace(/[\s-]/g, '');
+const isValidEgyptianPhone = (value) => /^01[0-9]{9}$/.test(normalizePhoneDigits(value));
+
 const paymentSettings = {
   vodafoneCashNumber,
   instructions: 'حوّل المبلغ إلى رقم Vodafone Cash، ثم اكتب رقم العملية والمبلغ الذي تم تحويله. سيتم إضافة الرصيد بعد مراجعة المدرس.',
@@ -895,6 +916,9 @@ app.post('/api/auth/register', async (req, res) => {
   if (!name || !studentPhone || !guardianPhone || !governorate || !password || password.length < 6 || !validGrade || !validTerm || !validEmail) {
     return res.status(400).json({ message: 'الاسم ورقم هاتف الطالب ورقم ولي الأمر والمحافظة وكلمة المرور مطلوبة، والبريد الإلكتروني إن أُدخل يجب أن يكون صحيحًا' });
   }
+  if (!isValidEgyptianPhone(studentPhone) || !isValidEgyptianPhone(guardianPhone)) {
+    return res.status(400).json({ message: 'رقم الهاتف يجب أن يكون رقمًا مصريًا صحيحًا مكونًا من 11 رقمًا ويبدأ بـ 01' });
+  }
   if (studentNumber && users.some((item) => item.studentNumber === String(studentNumber).trim())) {
     return res.status(409).json({ message: 'رقم الطالب مستخدم بالفعل' });
   }
@@ -908,8 +932,8 @@ app.post('/api/auth/register', async (req, res) => {
     grade,
     term: term || '',
     studentNumber: String(studentNumber || '').trim(),
-    phone: String(studentPhone).trim(),
-    guardianPhone: String(guardianPhone).trim(),
+    phone: normalizePhoneDigits(studentPhone),
+    guardianPhone: normalizePhoneDigits(guardianPhone),
     governorate: String(governorate).trim(),
     passwordHash: await bcrypt.hash(password, 10),
     role: 'student',
@@ -957,20 +981,29 @@ app.patch('/api/profile', authenticate, async (req, res) => {
   const phone = String(req.body.phone || '').trim();
   const guardianPhone = String(req.body.guardianPhone || '').trim();
   const avatar = String(req.body.avatar || '').trim();
+  const email = String(req.body.email || '').trim().toLowerCase();
   if (!name) return res.status(400).json({ message: 'الاسم مطلوب' });
+  if (phone && !isValidEgyptianPhone(phone)) return res.status(400).json({ message: 'رقم الهاتف يجب أن يكون رقمًا مصريًا صحيحًا مكونًا من 11 رقمًا ويبدأ بـ 01' });
+  if (guardianPhone && !isValidEgyptianPhone(guardianPhone)) return res.status(400).json({ message: 'رقم ولي الأمر يجب أن يكون رقمًا مصريًا صحيحًا مكونًا من 11 رقمًا ويبدأ بـ 01' });
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ message: 'البريد الإلكتروني غير صحيح' });
+  if (email && users.some((item) => item.id !== user.id && String(item.email || '').toLowerCase() === email)) {
+    return res.status(409).json({ message: 'البريد الإلكتروني مستخدم بالفعل' });
+  }
   if (avatar && !/^data:image\/(png|jpe?g|webp|gif);base64,/.test(avatar) && !/^https?:\/\//.test(avatar)) {
     return res.status(400).json({ message: 'صورة الملف الشخصي غير صالحة' });
   }
   if (avatar.length > 4 * 1024 * 1024) return res.status(400).json({ message: 'حجم الصورة كبير جدًا' });
 
   user.name = name;
-  user.phone = phone;
-  user.guardianPhone = guardianPhone;
+  user.phone = phone ? normalizePhoneDigits(phone) : '';
+  user.guardianPhone = guardianPhone ? normalizePhoneDigits(guardianPhone) : '';
   user.avatar = avatar;
-  await User.updateOne({ id: user.id }, { $set: { name, phone, guardianPhone, avatar } });
+  user.email = email;
+  // The email field has a sparse unique index: unset it when cleared instead of saving an empty string.
+  await User.updateOne({ id: user.id }, email ? { $set: { name, phone: user.phone, guardianPhone: user.guardianPhone, avatar, email } } : { $set: { name, phone: user.phone, guardianPhone: user.guardianPhone, avatar }, $unset: { email: '' } });
   res.json({
     message: 'تم تحديث الملف الشخصي',
-    user: { id: user.id, name: user.name, email: user.email, role: user.role, studentNumber: user.studentNumber || '', phone, guardianPhone, avatar, balance: user.balance },
+    user: { id: user.id, name: user.name, email: user.email, role: user.role, studentNumber: user.studentNumber || '', phone: user.phone, guardianPhone: user.guardianPhone, avatar, balance: user.balance },
   });
 });
 
