@@ -705,8 +705,19 @@ p {
 .stage-image::before {
   position: absolute;
   inset: 0;
+  z-index: 1;
   content: '';
   background: linear-gradient(180deg, rgba(8, 17, 31, 0.08), rgba(8, 17, 31, 0.5));
+  pointer-events: none;
+}
+
+.stage-image-img {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .stage-content {
@@ -3804,6 +3815,23 @@ animation: robot-idle 6s ease-in-out infinite, robot-step-in 720ms cubic-bezier(
   filter: brightness(1.08);
 }
 
+.package-summary-cover-img {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.package-summary-cover-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(0deg, rgba(8, 18, 29, 0.34), rgba(8, 18, 29, 0.08));
+  pointer-events: none;
+}
+
 .package-summary:focus-visible {
   outline: 3px solid rgba(216, 168, 78, 0.75);
   outline-offset: 4px;
@@ -6287,6 +6315,8 @@ animation: robot-idle 6s ease-in-out infinite, robot-step-in 720ms cubic-bezier(
 .student-home-shell .package-card:nth-child(4) { animation-delay: .52s; }
 .student-home-shell .package-card:nth-child(n+5) { animation-delay: .58s; }
 .student-home-shell .package-summary-cover { transition: background-size .45s ease, filter .3s ease; }
+.student-home-shell .package-summary-cover-img { transition: transform .45s ease; }
+.student-home-shell .package-summary:hover .package-summary-cover-img { transform: scale(1.04); }
 .student-home-shell .package-summary:hover .package-summary-cover { filter: saturate(1.12) brightness(1.04); }
 .student-home-shell .package-unit-index { transition: transform .25s ease, background-color .25s ease; }
 .student-home-shell .package-card:hover .package-unit-index { transform: translateY(-2px); background: rgba(12,35,60,.58); }
