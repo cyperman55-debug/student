@@ -1157,6 +1157,7 @@ p {
 }
 
 .chat-modal {
+  position: relative;
   width: min(100%, 680px);
   min-height: min(560px, calc(100vh - 40px));
   max-height: min(720px, calc(100vh - 40px));
@@ -5842,10 +5843,12 @@ animation: robot-idle 6s ease-in-out infinite, robot-step-in 720ms cubic-bezier(
   outline: 3px solid rgba(13, 154, 136, .14);
   background-color: #fff;
 }
+/* Audit fix: white text on the old gradient (#0c897d→#1bb99d) failed WCAG AA
+   (about 4.29:1 and 2.48:1, needs 4.5:1). Darker endpoints pass at 4.9:1+. */
 .landing-shell .login-modal .auth-form > button:not(.secondary-btn) {
   border: 0;
   border-radius: 13px;
-  background: linear-gradient(135deg, #0c897d, #1bb99d);
+  background: linear-gradient(135deg, #0a7f73, #08685c);
   color: #fff;
   box-shadow: 0 10px 22px rgba(8, 127, 117, .18);
 }
@@ -6301,4 +6304,82 @@ animation: robot-idle 6s ease-in-out infinite, robot-step-in 720ms cubic-bezier(
     scroll-behavior: auto !important;
     transition-duration: .01ms !important;
   }
+}
+
+/* --- Audit fixes: privacy link, forgot-password, footer, missing payment number --- */
+.link-btn {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: #0a7f73;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.auth-privacy-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.forgot-password-link {
+  display: block;
+  margin-top: 10px;
+  color: #0a7f73;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: underline;
+}
+
+.landing-footer {
+  display: flex;
+  justify-content: center;
+  padding: 18px 16px 26px;
+}
+
+.landing-footer .link-btn {
+  color: inherit;
+  opacity: 0.75;
+  font-size: 0.85rem;
+}
+
+.privacy-modal {
+  width: min(100%, 620px);
+}
+
+.privacy-content {
+  display: grid;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.9;
+}
+
+.privacy-content p {
+  margin: 0;
+}
+
+.privacy-content a {
+  color: #0a7f73;
+  font-weight: 700;
+}
+
+.vodafone-number-missing {
+  border-color: #f1d59b !important;
+  background: #fff8e8 !important;
+}
+
+.vodafone-number-missing strong {
+  color: #785411 !important;
+  font-weight: 600 !important;
+}
+
+.vodafone-number-missing a {
+  color: #0a7f73;
+  font-weight: 700;
 }
