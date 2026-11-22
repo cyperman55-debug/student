@@ -759,7 +759,13 @@ app.use('/api', async (req, res, next) => {
   next();
 });
 
-app.get('/api/public/students', (req, res) => {
+// Public GET responses change rarely; let Vercel's edge cache them briefly.
+const cachePublicBriefly = (req, res, next) => {
+  res.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+  next();
+};
+
+app.get('/api/public/students', cachePublicBriefly, (req, res) => {
   res.json({
     students: users
       .filter((item) => item.role === 'student' && item.status !== 'suspended')
@@ -767,7 +773,7 @@ app.get('/api/public/students', (req, res) => {
   });
 });
 
-app.get('/api/public/quiz-leaderboard', (req, res) => {
+app.get('/api/public/quiz-leaderboard', cachePublicBriefly, (req, res) => {
   const studentsById = new Map(users
     .filter((student) => student.role === 'student' && student.status !== 'suspended')
     .map((student) => [Number(student.id), student]));
@@ -803,7 +809,7 @@ app.get('/api/public/quiz-leaderboard', (req, res) => {
   res.json({ students });
 });
 
-app.get('/api/public/units/second-secondary', async (req, res) => {
+app.get('/api/public/units/second-secondary', cachePublicBriefly, async (req, res) => {
   const availableUnitIds = new Set([
     ...videoCatalog
       .filter((video) => video.grade === 'second-secondary')

@@ -489,6 +489,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [dashboard, setDashboard] = useState(null);
   const [publicStageUnits, setPublicStageUnits] = useState(publicStages);
+  const [publicUnitImages, setPublicUnitImages] = useState({});
   const [unitSettings, setUnitSettings] = useState(secondSecondaryUnits.map((unit) => ({ unitId: unit.id, title: unit.label, image: '', visible: true })));
   const [unitSettingsMessage, setUnitSettingsMessage] = useState('');
   const [savingUnitId, setSavingUnitId] = useState(null);
@@ -883,18 +884,26 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (token) return undefined;
     const controller = new AbortController();
     fetch(`${API_URL}/public/units/second-secondary`, { signal: controller.signal })
       .then(readApiResponse)
       .then((data) => {
         if (Array.isArray(data.units)) {
           setPublicStageUnits(data.units.map((unit) => ({ ...unit, subtitle: publicStages[0].subtitle })));
+          const images = {};
+          data.units.forEach((unit) => {
+            if (unit.image) images[`${unit.grade}:${unit.unitId}`] = unit.image;
+          });
+          setPublicUnitImages(images);
+          // Warm the first covers so the unit cards paint instantly once the dashboard data arrives.
+          data.units.slice(0, 3).forEach((unit) => {
+            if (unit.image) { const pre = new Image(); pre.decoding = 'async'; pre.src = unit.image; }
+          });
         }
       })
       .catch(() => {});
     return () => controller.abort();
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     if (token) return undefined;
@@ -2186,7 +2195,8 @@ function App() {
                     }
                   }}
                 >
-                  <div className="stage-image" style={stage.image ? { backgroundImage: `url('${stage.image}')` } : undefined}>
+                  <div className="stage-image">
+                    {stage.image && <img className="stage-image-img" src={stage.image} alt="" loading="lazy" decoding="async" />}
                     {stage.isNew && <span className="stage-new-badge">{'\u062c\u062f\u064a\u062f'}</span>}
                   </div>
                   <div className="stage-content">
@@ -2922,7 +2932,8 @@ function App() {
           </div>
           <div className="package-grid">
             {unitsWithContent.map((contentPackage, index) => {
-              const packageCover = contentPackage.videos.find((video) => video.cover)?.cover;
+              const videoCover = contentPackage.videos.find((video) => video.cover)?.cover;
+              const packageCover = videoCover || publicUnitImages[`${contentPackage.grade}:${contentPackage.unitId}`] || '';
               return <article key={contentPackage.packageKey} className="package-card">
                 <span className="package-price">{contentPackage.packagePrice > 0 ? <CurrencyAmount amount={contentPackage.packagePrice} /> : 'السعر قريبًا'}</span>
                 <button
@@ -2930,7 +2941,9 @@ function App() {
                   className="package-summary"
                   onClick={() => setSelectedPackageKey(contentPackage.packageKey)}
                 >
-                  <span className="package-summary-cover" style={packageCover ? { backgroundImage: `linear-gradient(0deg, rgba(8, 18, 29, 0.34), rgba(8, 18, 29, 0.08)), url('${packageCover}')` } : undefined}>
+                  <span className="package-summary-cover">
+                    {packageCover && <img className="package-summary-cover-img" src={packageCover} alt="" loading={index === 0 ? 'eager' : 'lazy'} fetchpriority={index === 0 ? 'high' : 'auto'} decoding="async" />}
+                    {packageCover && <span className="package-summary-cover-shade" aria-hidden="true" />}
                     <span className="package-unit-index">{String(index + 1).padStart(2, '0')}</span>
                     <span className="package-summary-play" aria-hidden="true">▶</span>
                   </span>
