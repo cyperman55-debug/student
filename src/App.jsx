@@ -609,6 +609,7 @@ function App() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileEmail, setProfileEmail] = useState('');
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  const [unitPreview, setUnitPreview] = useState(null);
   const [profileName, setProfileName] = useState('');
   const [profilePhone, setProfilePhone] = useState('');
   const [profileGuardianPhone, setProfileGuardianPhone] = useState('');
@@ -680,9 +681,21 @@ function App() {
     setLoginOpen(true);
   };
 
+  // Visitors can browse a unit's structure (titles, covers, counts) without
+  // any playable content; the server never sends URLs or questions here.
+  const openUnitPreview = (unitId) => {
+    const safeUnitId = Number(unitId) || 1;
+    setUnitPreview({ unitId: safeUnitId, data: null, error: '' });
+    fetch(`${API_URL}/public/units/second-secondary/${safeUnitId}/preview`)
+      .then(readApiResponse)
+      .then((data) => setUnitPreview((current) => (current && current.unitId === safeUnitId ? { unitId: safeUnitId, data, error: '' } : current)))
+      .catch((error) => setUnitPreview((current) => (current && current.unitId === safeUnitId ? { unitId: safeUnitId, data: null, error: error.message || 'تعذر تحميل محتوى الوحدة' } : current)));
+  };
+
   // Modal accessibility: close on Escape, trap Tab focus inside the open
   // modal, move focus into it on open and restore it on close.
-  const openModalKind = privacyOpen ? 'privacy'
+  const openModalKind = unitPreview ? 'unit-preview'
+    : privacyOpen ? 'privacy'
     : loginOpen ? 'login'
     : paymentOpen ? 'payment'
     : profileOpen ? 'profile'
@@ -692,14 +705,15 @@ function App() {
   useEffect(() => {
     if (!openModalKind) return undefined;
     const previouslyFocused = document.activeElement;
-    const dialogs = document.querySelectorAll('.login-modal, .payment-modal, .profile-modal, .chat-modal, .quiz-modal');
+    const dialogs = document.querySelectorAll('.login-modal, .payment-modal, .profile-modal, .chat-modal, .quiz-modal, .unit-preview-modal');
     const dialog = dialogs[dialogs.length - 1];
     if (dialog) {
       const focusTarget = dialog.querySelector('input:not([disabled]), select:not([disabled]), textarea, button:not([disabled])');
       (focusTarget || dialog).focus();
     }
     const closeCurrentModal = () => {
-      if (openModalKind === 'privacy') setPrivacyOpen(false);
+      if (openModalKind === 'unit-preview') setUnitPreview(null);
+      else if (openModalKind === 'privacy') setPrivacyOpen(false);
       else if (openModalKind === 'login') setLoginOpen(false);
       else if (openModalKind === 'payment') setPaymentOpen(false);
       else if (openModalKind === 'profile') setProfileOpen(false);
@@ -2187,11 +2201,11 @@ function App() {
                   role="button"
                   tabIndex={0}
                   aria-label={stage.title}
-                  onClick={scrollToLogin}
+                  onClick={() => openUnitPreview(stage.unitId || 1)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault();
-                      scrollToLogin();
+                      openUnitPreview(stage.unitId || 1);
                     }
                   }}
                 >
@@ -2374,6 +2388,56 @@ function App() {
               </div>
             </div>
           </section>
+
+          {unitPreview && <div className="profile-modal-backdrop" onClick={() => setUnitPreview(null)}>
+            <section className="profile-modal unit-preview-modal" role="dialog" aria-modal="true" aria-label="معاينة محتوى الوحدة" onClick={(event) => event.stopPropagation()}>
+              <button type="button" className="modal-close" aria-label="إغلاق النافذة" onClick={() => setUnitPreview(null)}>×</button>
+              {!unitPreview.data && !unitPreview.error && <p className="unit-preview-status">جاري تحميل محتوى الوحدة...</p>}
+              {unitPreview.error && <p className="unit-preview-status" role="alert">{unitPreview.error}</p>}
+              {unitPreview.data && <>
+                {unitPreview.data.unit.image && <div className="unit-preview-hero"><img src={unitPreview.data.unit.image} alt="" decoding="async" /></div>}
+                <div className="unit-preview-heading">
+                  <span className="eyebrow">معاينة المحتوى</span>
+                  <h3>{unitPreview.data.unit.title}</h3>
+                  <p>{unitPreview.data.unit.lessonCount} محاضرة • {unitPreview.data.unit.quizCount} اختبار{unitPreview.data.unit.packagePrice > 0 && <> • <CurrencyAmount amount={unitPreview.data.unit.packagePrice} /></>}</p>
+                </div>
+                {unitPreview.data.lessons.length > 0 && <div className="unit-preview-list">
+                  <h4>المحاضرات</h4>
+                  {unitPreview.data.lessons.map((lesson, index) => (
+                    <div className="unit-preview-item" key={lesson.id}>
+                      <span className="unit-preview-item-index">{String(index + 1).padStart(2, '0')}</span>
+                      {lesson.videos[0]?.cover && <img className="unit-preview-item-cover" src={lesson.videos[0].cover} alt="" loading="lazy" decoding="async" />}
+                      <span className="unit-preview-item-copy">
+                        <strong>{lesson.title}</strong>
+                        <span>{lesson.videos.length} فيديو شرح{lesson.pdfCount > 0 ? ` • ${lesson.pdfCount} ملف PDF` : ''}</span>
+                      </span>
+                      <span className="unit-preview-lock" role="img" aria-label="مقفل">🔒</span>
+                    </div>
+                  ))}
+                </div>}
+                {unitPreview.data.quizzes.length > 0 && <div className="unit-preview-list">
+                  <h4>الاختبارات</h4>
+                  {unitPreview.data.quizzes.map((quiz, index) => (
+                    <div className="unit-preview-item" key={quiz.id}>
+                      <span className="unit-preview-item-index">{String(index + 1).padStart(2, '0')}</span>
+                      <span className="unit-preview-item-copy">
+                        <strong>{quiz.title}</strong>
+                        <span>{quiz.questionCount} سؤال</span>
+                      </span>
+                      <span className="unit-preview-lock" role="img" aria-label="مقفل">🔒</span>
+                    </div>
+                  ))}
+                </div>}
+                <div className="unit-preview-cta">
+                  <p>المحتوى متاح للمشاهدة بعد تسجيل الدخول وفتح الوحدة.</p>
+                  <div className="unit-preview-cta-actions">
+                    <button type="button" className="primary-btn" onClick={() => { setUnitPreview(null); setRegisterMode(false); setLoginOpen(true); }}>تسجيل الدخول</button>
+                    <button type="button" className="secondary-btn" onClick={() => { setUnitPreview(null); setRegisterMode(true); setLoginOpen(true); }}>إنشاء حساب جديد</button>
+                  </div>
+                </div>
+              </>}
+            </section>
+          </div>}
 
           {loginOpen && <div className="login-modal-backdrop" onClick={() => setLoginOpen(false)}>
             <div className="auth-card public-login-box login-modal" role="dialog" aria-modal="true" aria-label={registerMode ? 'إنشاء حساب طالب' : 'تسجيل الدخول'} onClick={(event) => event.stopPropagation()}>
@@ -2722,7 +2786,7 @@ function App() {
               </button>
             </section>}
 
-            {packageUnlocked && <>
+            <>
               {selectedPackage.lessons.length > 0 && <section className="unit-lessons-section">
                 <div className="section-heading">
                   <span className="eyebrow">محاضرات الوحدة</span>
@@ -2730,13 +2794,13 @@ function App() {
                 </div>
                 <div className="unit-lesson-list">
                   {selectedPackage.lessons.map((lesson, index) => (
-                    <article className={`unit-lesson-card ${lesson.requiredQuizId && !lesson.requiredQuizCompleted ? 'quiz-gated' : ''}`} key={lesson.id}>
-                      <button type="button" className="unit-lesson-link" disabled={Boolean(lesson.requiredQuizId && !lesson.requiredQuizCompleted)} onClick={() => { setSelectedLessonVideoId(lesson.id); setPlayingLessonVideoId(null); closeLessonPdf(); }}>
+                    <article className={`unit-lesson-card ${!packageUnlocked ? 'locked' : ''} ${lesson.requiredQuizId && !lesson.requiredQuizCompleted ? 'quiz-gated' : ''}`} key={lesson.id}>
+                      <button type="button" className="unit-lesson-link" disabled={!packageUnlocked || Boolean(lesson.requiredQuizId && !lesson.requiredQuizCompleted)} onClick={() => { if (!packageUnlocked) return; setSelectedLessonVideoId(lesson.id); setPlayingLessonVideoId(null); closeLessonPdf(); }}>
                         <span className="unit-lesson-thumbnail">
                           {lesson.videos[0]?.cover ? <img src={lesson.videos[0].cover} alt="" /> : <span className="unit-lesson-thumbnail-placeholder" aria-hidden="true">▶</span>}
                           <span className="unit-lesson-thumbnail-shade" aria-hidden="true" />
                           <span className="unit-lesson-thumbnail-number">محاضرة {String(index + 1).padStart(2, '0')}</span>
-                          <span className="unit-lesson-thumbnail-play" aria-hidden="true">▶</span>
+                          <span className="unit-lesson-thumbnail-play" aria-hidden="true">{packageUnlocked ? '▶' : '🔒'}</span>
                         </span>
                         <span className="unit-lesson-link-copy">
                           <span className="eyebrow">المحاضرة {index + 1}</span>
@@ -2747,9 +2811,9 @@ function App() {
                             {selectedPackage.quizzes.some((quiz) => String(quiz.lessonId || '') === String(lesson.id)) && <span>اختبار</span>}
                           </span>
                         </span>
-                        <span className="unit-lesson-open-label">{lesson.requiredQuizId && !lesson.requiredQuizCompleted ? 'أكمل الاختبار لفتح المحاضرة' : 'فتح المحاضرة'} <span aria-hidden="true">←</span></span>
+                        <span className="unit-lesson-open-label">{!packageUnlocked ? 'مقفلة' : lesson.requiredQuizId && !lesson.requiredQuizCompleted ? 'أكمل الاختبار لفتح المحاضرة' : 'فتح المحاضرة'} <span aria-hidden="true">←</span></span>
                       </button>
-                      {lesson.requiredQuizId && !lesson.requiredQuizCompleted && <div className="unit-lesson-gate-actions">
+                      {packageUnlocked && lesson.requiredQuizId && !lesson.requiredQuizCompleted && <div className="unit-lesson-gate-actions">
                         <span>هذه المحاضرة تتطلب إكمال اختبار محدد.</span>
                         {(dashboard?.quizzes || []).some((quiz) => String(quiz.id) === String(lesson.requiredQuizId)) && <button type="button" className="primary-btn small-btn" onClick={() => startQuiz(lesson.requiredQuizId)} disabled={loading}>ابدأ الاختبار المطلوب</button>}
                       </div>}

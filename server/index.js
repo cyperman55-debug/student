@@ -843,6 +843,52 @@ app.get('/api/public/units/second-secondary', cachePublicBriefly, async (req, re
 
   res.json({ units });
 });
+// Public, content-safe preview of one unit: titles, covers and counts only.
+// Never includes video URLs, PDF links or quiz questions, so visitors and
+// unpurchased students can browse without any playable content leaking.
+app.get('/api/public/units/second-secondary/:unitId/preview', cachePublicBriefly, async (req, res) => {
+  const unitId = Number(req.params.unitId) || 1;
+  const setting = unitSettings.find((item) => item.unitId === unitId);
+  if (setting?.visible === false) return res.status(404).json({ message: 'الوحدة غير متاحة' });
+  const unitVideos = videoCatalog.filter((video) => video.grade === 'second-secondary' && Number(video.unitId) === unitId);
+  const unitQuizzes = quizzes.filter((quiz) => quiz.published && quiz.grade === 'second-secondary' && Number(quiz.unitId) === unitId);
+  if (!unitVideos.length && !unitQuizzes.length) return res.status(404).json({ message: 'الوحدة غير متاحة' });
+
+  const lessonIds = new Set(unitVideos.map((video) => Number(video.lessonId || video.id)));
+  const unitLessons = (await getLessonSummaries((lesson) => lesson.grade === 'second-secondary' && Number(lesson.unitId) === unitId))
+    .filter((lesson) => lessonIds.has(Number(lesson.id)));
+  const lessons = unitLessons.map((lesson) => ({
+    id: lesson.id,
+    title: lesson.title,
+    videos: lesson.videos
+      .filter((video) => unitVideos.some((unitVideo) => unitVideo.id === video.id))
+      .map((video) => ({ id: video.id, title: video.title, cover: video.cover })),
+    pdfCount: lesson.pdfs.length,
+  })).filter((lesson) => lesson.videos.length > 0);
+
+  const packagePrice = Math.max(0,
+    ...unitVideos.map((video) => Number(video.packagePrice) || 0),
+    ...unitQuizzes.map((quiz) => Number(quiz.packagePrice) || 0));
+
+  res.json({
+    unit: {
+      unitId,
+      title: setting?.title || lessons[0]?.title || unitVideos[0]?.title || `الوحدة ${unitId}`,
+      image: setting?.image || unitVideos.find((video) => video.cover)?.cover || '',
+      packagePrice,
+      lessonCount: lessons.length,
+      quizCount: unitQuizzes.length,
+    },
+    lessons,
+    quizzes: unitQuizzes.map(({ questions, ...quiz }) => ({
+      id: quiz.id,
+      title: quiz.title,
+      questionCount: (questions || []).length,
+      lessonId: quiz.lessonId || null,
+    })),
+  });
+});
+
 app.get('/api/admin/units', authenticate, requireAdmin, (req, res) => {
   res.json({ units: unitSettings });
 });
