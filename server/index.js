@@ -573,9 +573,11 @@ const quizAttempts = [];
 const quizPurchases = [];
 const videoPurchases = [];
 const rechargeRequests = [];
-const vodafoneCashNumber = String(process.env.VODAFONE_CASH_NUMBER || '').trim();
-if (!vodafoneCashNumber) {
-  console.warn('VODAFONE_CASH_NUMBER is not set; students will not see a transfer number until it is configured in the hosting environment.');
+// Public wallet number students transfer to. The VODAFONE_CASH_NUMBER env var overrides it when set.
+const DEFAULT_VODAFONE_CASH_NUMBER = '01112004658';
+const vodafoneCashNumber = String(process.env.VODAFONE_CASH_NUMBER || '').trim() || DEFAULT_VODAFONE_CASH_NUMBER;
+if (!process.env.VODAFONE_CASH_NUMBER) {
+  console.warn(`VODAFONE_CASH_NUMBER is not set; using the built-in default ${DEFAULT_VODAFONE_CASH_NUMBER}.`);
 }
 
 // Egyptian mobile numbers: 11 digits starting with 01 (e.g. 010xxxxxxxx).
