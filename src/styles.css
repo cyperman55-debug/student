@@ -301,7 +301,7 @@ p {
   padding: 0 24px 84px;
 }
 
-.landing-main > :not(.code-gap):not(.login-modal-backdrop) {
+.landing-main > :not(.code-gap):not(.login-modal-backdrop):not(.profile-modal-backdrop) {
   position: relative;
   z-index: 1;
 }
