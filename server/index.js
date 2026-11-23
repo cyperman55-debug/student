@@ -1202,9 +1202,25 @@ app.get('/api/payment-settings', authenticate, (req, res) => {
   res.json({ settings: paymentSettings });
 });
 
-app.get('/api/recharge-requests/my', authenticate, (req, res) => {
+app.get('/api/recharge-requests/my', authenticate, async (req, res) => {
   if (req.user.role !== 'student') return res.status(403).json({ message: 'هذه العملية خاصة بالطلاب' });
-  res.json({ requests: rechargeRequests.filter((request) => request.studentId === req.user.id) });
+  try {
+    // Never serve another instance's cold-start copy of a reviewed request.
+    const requests = mongoReady
+      ? await RechargeRequest.find({ studentId: Number(req.user.id) }).sort({ createdAt: -1 }).lean()
+      : rechargeRequests.filter((request) => Number(request.studentId) === Number(req.user.id));
+    const student = mongoReady
+      ? await User.findOne({ id: Number(req.user.id), role: 'student' }).select('balance').lean()
+      : users.find((user) => Number(user.id) === Number(req.user.id));
+    if (!student) return res.status(404).json({ message: 'الطالب غير موجود' });
+    res.json({ requests: requests.map((request) => ({
+      id: String(request.id), amount: request.amount, status: request.status,
+      createdAt: request.createdAt, reviewedAt: request.reviewedAt,
+      creditedAmount: request.creditedAmount, rejectionReason: request.rejectionReason,
+    })), balance: student.balance });
+  } catch {
+    res.status(503).json({ message: 'تعذر تحديث حالة الشحن. حاول مرة أخرى.' });
+  }
 });
 
 app.post('/api/recharge-requests', authenticate, async (req, res) => {
@@ -1273,7 +1289,7 @@ app.post('/api/admin/recharge-requests/:id/approve', authenticate, requireAdmin,
   }
   const memoryStudent = users.find((user) => Number(user.id) === Number(request.studentId));
   if (memoryStudent) memoryStudent.balance = newBalance;
-  await RechargeRequest.updateOne({ id: request.id }, { $set: { status: request.status, creditedAmount: request.creditedAmount, reviewedAt: request.reviewedAt } });
+  if (mongoReady) await RechargeRequest.updateOne({ id: request.id }, { $set: { status: request.status, creditedAmount: request.creditedAmount, reviewedAt: request.reviewedAt } });
   const memoryRequest = rechargeRequests.find((item) => String(item.id) === String(request.id));
   if (memoryRequest) Object.assign(memoryRequest, { status: request.status, creditedAmount: request.creditedAmount, reviewedAt: request.reviewedAt });
   res.json({ request, balance: newBalance, message: 'تم اعتماد الطلب وإضافة الرصيد' });
@@ -1288,7 +1304,7 @@ app.post('/api/admin/recharge-requests/:id/reject', authenticate, requireAdmin, 
   request.status = 'Rejected';
   request.rejectionReason = String(req.body.reason || 'لم يتم اعتماد التحويل');
   request.reviewedAt = new Date().toISOString();
-  await RechargeRequest.updateOne({ id: request.id }, { $set: { status: request.status, rejectionReason: request.rejectionReason, reviewedAt: request.reviewedAt } });
+  if (mongoReady) await RechargeRequest.updateOne({ id: request.id }, { $set: { status: request.status, rejectionReason: request.rejectionReason, reviewedAt: request.reviewedAt } });
   const memoryRequest = rechargeRequests.find((item) => String(item.id) === String(request.id));
   if (memoryRequest) Object.assign(memoryRequest, { status: request.status, rejectionReason: request.rejectionReason, reviewedAt: request.reviewedAt });
   res.json({ request, message: 'تم رفض طلب الدفع' });

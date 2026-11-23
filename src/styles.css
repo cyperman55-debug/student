@@ -6562,3 +6562,26 @@ animation: robot-idle 6s ease-in-out infinite, robot-step-in 720ms cubic-bezier(
   color: #0a7f73;
   font-weight: 700;
 }
+
+/* Student progress and recharge feedback, including narrow RTL phones. */
+.continue-watching, .recharge-status-panel { margin: 18px auto; padding: 20px; border: 1px solid #cbdde8; border-radius: 18px; background: #fff; color: #153449; max-width: 1200px; box-sizing: border-box; overflow-wrap: anywhere; }
+.continue-watching { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.continue-watching h3 { margin: 8px 0; }
+.continue-watching p { margin: 0; }
+.recharge-status-panel summary { cursor: pointer; font-weight: 700; padding: 6px 0; }
+.recharge-notice { display: flex; align-items: center; justify-content: space-between; gap: 14px; background: #eaf6ff; padding: 12px; border-radius: 12px; margin-bottom: 12px; }
+.recharge-notice p { margin: 6px 0; }
+.recharge-status-panel .recharge-history { max-height: 350px; overflow-y: auto; }
+.recharge-history .recharge-status-item { display: block; border: 1px solid #d0dde5; border-inline-start: 4px solid #94701c; border-radius: 10px; padding: 12px; margin: 12px 0; background: #fff; color: #153449; }
+.recharge-history .recharge-status-item > div { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.recharge-history .recharge-status-item p { margin: 8px 0; }
+.recharge-history .recharge-status-item small { display: block; color: #496170; margin-top: 6px; }
+.recharge-history .status-Approved { border-inline-start-color: #237547; }
+.recharge-history .status-Rejected { border-inline-start-color: #b12d33; }
+.recharge-status-label { font-weight: 700; }
+.resume-player-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; color: #375467; }
+@media (max-width: 600px) {
+  .continue-watching, .recharge-status-panel { margin: 12px; padding: 14px; }
+  .continue-watching, .recharge-notice, .resume-player-status { flex-direction: column; align-items: stretch; }
+  .continue-watching > *, .recharge-notice > * { min-width: 0; }
+}

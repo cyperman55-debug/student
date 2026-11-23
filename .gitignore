@@ -9,3 +9,6 @@ atlas-credentials*.env
 server/data/
 .vercel
 .env*
+
+test-results/
+playwright-report/

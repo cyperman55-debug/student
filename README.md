@@ -59,3 +59,16 @@ git branch -M main
 git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git
 git push -u origin main
 ```
+
+## Student progress and recharge status
+
+- Playback progress is saved in this browser's local storage per student and exact video URL. It is not synced between devices. Completed videos restart from the beginning. Changing a video's source invalidates its old resume point.
+- Bunny iframe players and direct MP4/WebM/Ogg files support automatic resume. Other embeds keep working but show a note that automatic resume is unavailable. The Bunny integration uses the player.js postMessage protocol with both origin and source-window checks, without loading a third-party script. Reference: https://bunny.net/docs/stream/player/javascript
+- Students can open recharge history from their home, unit or lesson page. Status refreshes every 60 seconds while visible, on return to the tab, and manually. Approved requests show the actual credited amount; rejected requests show the admin's reason. Notices appear inside the site, not as push notifications.
+- The student history endpoint reads the student's requests and balance from Mongo on each request and returns `private, no-store`; it does not expose other students' requests.
+
+### Isolated regression tests
+
+Run `npm ci`, `npx playwright install chromium`, `npm test`, `npm run test:e2e`, and `npm run build`.
+
+The API tests use a fresh in-memory app with synthetic users, no Mongo URI, and an ephemeral local port. Browser tests intercept API and third-party requests, use local fixtures, exercise Bunny message handling and a simulated native-media timeline, and inspect 360px and desktop layouts. Screenshots go to `test-results` (override with `SCREENSHOT_DIR`). They do not log into production, move real money, or play a real paid Bunny stream. Real Mongo persistence across serverless instances and a domain-authorized Bunny stream still need a post-approval deployment smoke test.
