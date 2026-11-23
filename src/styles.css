@@ -1828,6 +1828,7 @@ button.lesson-resource-row:hover {
 .pdf-import-card {
   display: grid;
   gap: 16px;
+  min-width: 0;
   margin-bottom: 18px;
   background: linear-gradient(135deg, #f1f6fc, #ffffff);
 }
@@ -1850,8 +1851,9 @@ button.lesson-resource-row:hover {
 }
 
 .pdf-import-row input[type='file'] {
-  flex: 1;
-  min-width: 240px;
+  flex: 1 1 200px;
+  min-width: 0;
+  width: 100%;
   padding: 10px;
   border: 1px dashed var(--primary);
   border-radius: 10px;
@@ -2914,12 +2916,14 @@ animation: robot-idle 6s ease-in-out infinite, robot-step-in 720ms cubic-bezier(
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
   color: var(--muted);
 }
 
 .management-field input,
 .management-field select {
   width: 100%;
+  min-width: 0;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 10px;
