@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import ResumePlayer, { readProgress, formatPosition } from './ResumePlayer';
+import RechargeStatus, { RechargeHistory } from './RechargeStatus';
 import heroImage from './hero.webp';
 
 const cloudflareApiUrl = 'https://student-roitosi.vercel.app/api';
@@ -2596,6 +2598,8 @@ function App() {
           lessonMap.set(lessonId, {
             id: lessonId,
             title: metadata?.title || video.title,
+            requiredQuizId: metadata?.requiredQuizId,
+            requiredQuizCompleted: metadata?.requiredQuizCompleted,
             createdAt: metadata?.createdAt || video.createdAt,
             videos: [],
             pdfs: metadata?.pdfs || [],
@@ -2663,6 +2667,11 @@ function App() {
       );
     }
 
+    const lastProgress = Object.values(readProgress(user.id))
+      .filter((entry) => !entry.completed && entry.seconds > 0 && videos.some((video) => video.id === entry.videoId && video.url && video.url === entry.url))
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    const resumeVideo = lastProgress && videos.find((video) => video.id === lastProgress.videoId);
+
     const selectedPackage = Object.values(studentPackages).find((contentPackage) => contentPackage.packageKey === selectedPackageKey);
     const selectedLesson = selectedPackage?.lessons.find((lesson) => String(lesson.id) === String(selectedLessonVideoId));
     if (selectedPackage && selectedLesson) {
@@ -2675,6 +2684,7 @@ function App() {
 
       return (
         <div className="student-shell lesson-detail-shell">
+          <RechargeStatus key={user.id} studentId={user.id} token={token} apiUrl={API_URL} onRequests={setRechargeRequests} onBalance={(balance) => setDashboard((current) => current ? { ...current, balance } : current)} />
           <header className="student-header unit-detail-header">
             <div className="unit-detail-toolbar">
               <button type="button" className="secondary-btn unit-back-button" onClick={() => { setSelectedLessonVideoId(null); setPlayingLessonVideoId(null); closeLessonPdf(); }}>
@@ -2713,24 +2723,7 @@ function App() {
                 </div>
                 {resource.video.url && (playingLessonVideoId === resource.id ? (
                   <>
-                    <div className="lesson-video-frame-wrap">
-                      {/\.(mp4|webm|ogg)(?:$|[?#])/i.test(resource.video.url) ? <video
-                        className="lesson-video-frame lesson-video-native"
-                        src={getPlayableVideoUrl(resource.video.url)}
-                        title={`شرح المحاضرة: ${resource.video.title}`}
-                        controls
-                        playsInline
-                        onError={() => setVideoPlaybackError({ id: resource.id, message: 'تعذر تحميل ملف الفيديو. تحقق من رابط الملف وإتاحته.' })}
-                      /> : <iframe
-                          className="lesson-video-frame"
-                          src={getPlayableVideoUrl(resource.video.url)}
-                          title={`شرح المحاضرة: ${resource.video.title}`}
-                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-                          referrerPolicy="strict-origin-when-cross-origin"
-                          allowFullScreen
-                        />}
-                      <div className="video-watermark" aria-hidden="true">{user.email} • {user.name}</div>
-                    </div>
+                    <ResumePlayer watermark={`${user.email || ''} • ${user.name}`} key={resource.id} studentId={user.id} video={resource.video} src={getPlayableVideoUrl(resource.video.url)} onError={() => setVideoPlaybackError({ id: resource.id, message: 'تعذر تحميل ملف الفيديو. تحقق من رابط الملف وإتاحته.' })} />
                     <div className="lesson-video-actions">
                       <button type="button" className="secondary-btn lesson-video-stop" onClick={() => playLessonVideo(resource.video)}>إيقاف الشرح</button>
                     </div>
@@ -2779,6 +2772,7 @@ function App() {
 
       return (
         <div className="student-shell unit-detail-shell">
+          <RechargeStatus key={user.id} studentId={user.id} token={token} apiUrl={API_URL} onRequests={setRechargeRequests} onBalance={(balance) => setDashboard((current) => current ? { ...current, balance } : current)} />
           <header className="student-header unit-detail-header">
             <div className="unit-detail-toolbar">
               <button type="button" className="secondary-btn unit-back-button" onClick={() => { setSelectedPackageKey(null); setSelectedLessonVideoId(null); setPlayingLessonVideoId(null); closeLessonPdf(); }}>
@@ -2857,7 +2851,7 @@ function App() {
                   ))}
                 </div>
               </section>}
-            </>}
+            </>
           </main>
           {paymentOpen && <div className="payment-modal-backdrop" onClick={() => setPaymentOpen(false)}>
             <section className="payment-modal" role="dialog" aria-modal="true" aria-label="شحن رصيد الطالب" onClick={(event) => event.stopPropagation()}>
@@ -2880,7 +2874,7 @@ function App() {
                 {rechargeMessage && <div className="message">{rechargeMessage}</div>}
                 <button type="submit" className="primary-btn" disabled={!paymentSettings?.vodafoneCashNumber}>إرسال طلب الشحن</button>
               </form>
-              <div className="recharge-history"><h3>طلبات الشحن السابقة</h3>{rechargeRequests.map((request) => <div key={request.id}><strong>مبلغ التحويل: <CurrencyAmount amount={request.amount} /></strong><span>{request.status === 'Pending' ? 'قيد المراجعة' : request.status === 'Approved' ? 'تم الاعتماد' : 'مرفوض'}</span></div>)}{!rechargeRequests.length && <p>لا توجد طلبات سابقة.</p>}</div>
+              <RechargeHistory requests={rechargeRequests} />
             </section>
           </div>}
         </div>
@@ -2889,6 +2883,7 @@ function App() {
 
     return (
       <div className="student-shell student-home-shell">
+          <RechargeStatus key={user.id} studentId={user.id} token={token} apiUrl={API_URL} onRequests={setRechargeRequests} onBalance={(balance) => setDashboard((current) => current ? { ...current, balance } : current)} />
         <header className="student-header student-dashboard-header">
           <div className="student-header-title">
             <p className="eyebrow">مساحة التعلم</p>
@@ -2904,6 +2899,15 @@ function App() {
             </button>
           </div>
         </header>
+
+        {resumeVideo && <section className="continue-watching">
+          <div><span className="eyebrow">كمّل من آخر مرة</span><h3>{resumeVideo.title}</h3><p>آخر موضع: <b dir="ltr">{formatPosition(lastProgress.seconds)}</b> • على هذا الجهاز</p></div>
+          <button type="button" className="primary-btn" onClick={() => {
+            setSelectedPackageKey(resumeVideo.packageKey || `${resumeVideo.grade}:${resumeVideo.term || 'all'}:${resumeVideo.unitId || 1}`);
+            setSelectedLessonVideoId(resumeVideo.lessonId || resumeVideo.id);
+            playLessonVideo(resumeVideo);
+          }}>استكمال المشاهدة</button>
+        </section>}
 
         <section className="student-overview" aria-label="ملخص المحتوى الدراسي">
           <div className="student-overview-copy">
@@ -2997,7 +3001,7 @@ function App() {
               {rechargeMessage && <div className="message">{rechargeMessage}</div>}
               <button type="submit" className="primary-btn" disabled={!paymentSettings?.vodafoneCashNumber}>إرسال طلب الشحن</button>
             </form>
-            <div className="recharge-history"><h3>طلبات الشحن السابقة</h3>{rechargeRequests.map((request) => <div key={request.id}><strong>مبلغ التحويل: <CurrencyAmount amount={request.amount} /></strong><span>{request.status === 'Pending' ? 'قيد المراجعة' : request.status === 'Approved' ? 'تم الاعتماد' : 'مرفوض'}</span></div>)}{!rechargeRequests.length && <p>لا توجد طلبات سابقة.</p>}</div>
+            <RechargeHistory requests={rechargeRequests} />
           </section>
         </div>}
 
