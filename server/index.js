@@ -127,6 +127,13 @@ const videoPurchaseSchema = new mongoose.Schema({
   purchasedAt: { type: Date, default: Date.now },
 }, { versionKey: false });
 const VideoPurchase = mongoose.models.VideoPurchase || mongoose.model('VideoPurchase', videoPurchaseSchema);
+const quizPurchaseSchema = new mongoose.Schema({
+  quizId: { type: String, required: true },
+  studentId: { type: Number, required: true },
+  price: { type: Number, required: true, min: 0 },
+  purchasedAt: { type: Date, default: Date.now },
+}, { versionKey: false });
+const QuizPurchase = mongoose.models.QuizPurchase || mongoose.model('QuizPurchase', quizPurchaseSchema);
 const chatMessageSchema = new mongoose.Schema({
   id: { type: Number, required: true, unique: true },
   userId: { type: Number, required: true },
@@ -175,12 +182,21 @@ const videoCatalog = [
   { id: 1, lessonId: 1, title: 'محاضرة تمهيدية', cover: 'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg', coverIsCustom: false, url: 'https://www.youtube.com/embed/dQw4w9WgXcQ', price: 10, grade: 'second-secondary', term: '', unitId: 1, packagePrice: 50 },
   { id: 2, lessonId: 2, title: 'شرح الوحدة الأولى', cover: 'https://img.youtube.com/vi/ysz5S6PUM-U/hqdefault.jpg', coverIsCustom: false, url: 'https://www.youtube.com/embed/ysz5S6PUM-U', price: 10, grade: 'second-secondary', term: '', unitId: 1, packagePrice: 50 },
 ];
-const unitSettings = Array.from({ length: 7 }, (_, index) => ({
+const buildDefaultUnitSettings = () => Array.from({ length: 7 }, (_, index) => ({
   unitId: index + 1,
   title: `الوحدة ${index + 1}`,
   image: '',
   visible: true,
 }));
+const unitSettings = buildDefaultUnitSettings();
+const mergeUnitSettingDocs = (savedDocs) => {
+  const savedById = new Map((savedDocs || []).map((setting) => [Number(setting.unitId), setting]));
+  return buildDefaultUnitSettings().map((setting) => ({
+    ...setting,
+    ...(savedById.has(setting.unitId) ? savedById.get(setting.unitId) : {}),
+    unitId: setting.unitId,
+  }));
+};
 const legacyGeneratedCovers = new Set([
   'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80',
   'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1200&q=80',
@@ -207,14 +223,14 @@ function packageKey(grade, term, unitId) {
   return `${String(grade || 'second-secondary')}:${String(term || 'all')}:${Number(unitId) || 1}`;
 }
 
-function getLessonVideoItems(lessonId) {
-  return videoCatalog
+function getLessonVideoItems(lessonId, catalog = videoCatalog) {
+  return catalog
     .filter((video) => Number(video.lessonId || video.id) === Number(lessonId))
     .sort((left, right) => new Date(left.createdAt || 0) - new Date(right.createdAt || 0) || left.id - right.id);
 }
 
-async function getLessonPdfItems(lessonId) {
-  const lessonVideos = getLessonVideoItems(lessonId);
+async function getLessonPdfItems(lessonId, catalog = videoCatalog) {
+  const lessonVideos = getLessonVideoItems(lessonId, catalog);
   let legacyPdfs = [];
   let additionalPdfs = [];
   if (mongoReady) {
@@ -243,14 +259,14 @@ async function getLessonPdfItems(lessonId) {
   ].sort((left, right) => new Date(left.createdAt || 0) - new Date(right.createdAt || 0));
 }
 
-async function getLessonSummaries(predicate = () => true) {
-  return Promise.all(lessonCatalog
+async function getLessonSummaries(predicate = () => true, lessons = lessonCatalog, catalog = videoCatalog) {
+  return Promise.all(lessons
     .filter((lesson) => predicate(lesson))
     .sort((left, right) => new Date(left.createdAt || 0) - new Date(right.createdAt || 0) || left.id - right.id)
     .map(async (lesson) => ({
       ...lesson,
-      videos: getLessonVideoItems(lesson.id),
-      pdfs: await getLessonPdfItems(lesson.id),
+      videos: getLessonVideoItems(lesson.id, catalog),
+      pdfs: await getLessonPdfItems(lesson.id, catalog),
     })));
 }
 
@@ -326,6 +342,42 @@ function getVideoCoverFromUrl(value) {
   return '';
 }
 
+function normalizeVideoDoc(savedVideo) {
+  const url = normalizeVideoUrl(savedVideo.url);
+  const savedCover = String(savedVideo.cover || '');
+  const generatedCover = getVideoCoverFromUrl(url);
+  const isCustomCover = typeof savedVideo.coverIsCustom === 'boolean'
+    ? savedVideo.coverIsCustom
+    : Boolean(savedCover && savedCover !== generatedCover && !legacyGeneratedCovers.has(savedCover));
+  const cover = isCustomCover ? savedCover : generatedCover || (legacyGeneratedCovers.has(savedCover) ? '' : savedCover);
+  return {
+    ...savedVideo,
+    id: Number(savedVideo.id),
+    lessonId: Number(savedVideo.lessonId) || Number(savedVideo.id),
+    url,
+    cover,
+    coverIsCustom: isCustomCover,
+    price: Number(savedVideo.price) || 10,
+    grade: savedVideo.grade || 'second-secondary',
+    term: savedVideo.term || '',
+    unitId: Number(savedVideo.unitId) || 1,
+    packagePrice: Number(savedVideo.packagePrice) || Number(savedVideo.price) || 10,
+    createdAt: savedVideo.createdAt || (savedVideo._id?.getTimestamp ? savedVideo._id.getTimestamp() : new Date(0)),
+  };
+}
+
+function normalizeQuizDoc(quiz) {
+  return {
+    ...quiz,
+    id: String(quiz.id || quiz._id),
+    price: Number(quiz.price) >= 1 ? Number(quiz.price) : 10,
+    grade: quiz.grade || 'second-secondary',
+    term: quiz.term || '',
+    unitId: Number(quiz.unitId) || 1,
+    packagePrice: Number(quiz.packagePrice) || Number(quiz.price) || 10,
+  };
+}
+
 const initializeMongo = () => mongoConfigured
   ? mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 10000 })
       .then(async () => {
@@ -372,29 +424,7 @@ const initializeMongo = () => mongoConfigured
         }
         const savedVideos = await Video.find().lean();
         if (savedVideos.length) {
-          const normalizedVideos = savedVideos.map((savedVideo) => {
-            const url = normalizeVideoUrl(savedVideo.url);
-            const savedCover = String(savedVideo.cover || '');
-            const generatedCover = getVideoCoverFromUrl(url);
-            const isCustomCover = typeof savedVideo.coverIsCustom === 'boolean'
-              ? savedVideo.coverIsCustom
-              : Boolean(savedCover && savedCover !== generatedCover && !legacyGeneratedCovers.has(savedCover));
-            const cover = isCustomCover ? savedCover : generatedCover || (legacyGeneratedCovers.has(savedCover) ? '' : savedCover);
-            return {
-              ...savedVideo,
-              id: Number(savedVideo.id),
-              lessonId: Number(savedVideo.lessonId) || Number(savedVideo.id),
-              url,
-              cover,
-              coverIsCustom: isCustomCover,
-              price: Number(savedVideo.price) || 10,
-              grade: savedVideo.grade || 'second-secondary',
-              term: savedVideo.term || '',
-              unitId: Number(savedVideo.unitId) || 1,
-              packagePrice: Number(savedVideo.packagePrice) || Number(savedVideo.price) || 10,
-              createdAt: savedVideo.createdAt || (savedVideo._id?.getTimestamp ? savedVideo._id.getTimestamp() : new Date(0)),
-            };
-          });
+          const normalizedVideos = savedVideos.map(normalizeVideoDoc);
           videoCatalog.splice(0, videoCatalog.length, ...normalizedVideos);
           await Promise.all(videoCatalog.map((video) => Video.updateOne(
             { id: video.id },
@@ -435,12 +465,7 @@ const initializeMongo = () => mongoConfigured
           { upsert: true },
         )));
         const savedUnitSettings = await UnitSetting.find().lean();
-        const savedUnitSettingsById = new Map(savedUnitSettings.map((setting) => [Number(setting.unitId), setting]));
-        unitSettings.splice(0, unitSettings.length, ...unitSettings.map((setting) => ({
-          ...setting,
-          ...(savedUnitSettingsById.has(setting.unitId) ? savedUnitSettingsById.get(setting.unitId) : {}),
-          unitId: setting.unitId,
-        })));
+        unitSettings.splice(0, unitSettings.length, ...mergeUnitSettingDocs(savedUnitSettings));
         await Promise.all(unitSettings.map((setting) => UnitSetting.updateOne(
           { unitId: setting.unitId },
           { $setOnInsert: setting },
@@ -451,7 +476,7 @@ const initializeMongo = () => mongoConfigured
         const savedQuizzes = await Quiz.find().lean();
         const legacyQuizzes = savedQuizzes.filter((quiz) => !quiz.price || quiz.price < 1);
         if (legacyQuizzes.length) await Quiz.updateMany({ _id: { $in: legacyQuizzes.map((quiz) => quiz._id) } }, { $set: { price: 10 } });
-        quizzes.push(...savedQuizzes.map((quiz) => ({ ...quiz, id: String(quiz.id || quiz._id), price: Number(quiz.price) >= 1 ? Number(quiz.price) : 10, grade: quiz.grade || 'second-secondary', term: quiz.term || '', unitId: Number(quiz.unitId) || 1, packagePrice: Number(quiz.packagePrice) || Number(quiz.price) || 10 })));
+        quizzes.push(...savedQuizzes.map(normalizeQuizDoc));
         const savedQuizAttempts = await QuizAttempt.find().lean();
         quizAttempts.splice(0, quizAttempts.length, ...savedQuizAttempts.map((attempt) => ({
           ...attempt,
@@ -476,6 +501,13 @@ const initializeMongo = () => mongoConfigured
         const savedVideoPurchases = await VideoPurchase.find().lean();
         videoPurchases.push(...savedVideoPurchases.map((purchase) => ({
           videoId: Number(purchase.videoId),
+          studentId: Number(purchase.studentId),
+          price: Number(purchase.price),
+          purchasedAt: purchase.purchasedAt,
+        })));
+        const savedQuizPurchases = await QuizPurchase.find().lean();
+        quizPurchases.push(...savedQuizPurchases.map((purchase) => ({
+          quizId: String(purchase.quizId),
           studentId: Number(purchase.studentId),
           price: Number(purchase.price),
           purchasedAt: purchase.purchasedAt,
@@ -595,26 +627,118 @@ const paymentSettings = {
 };
 const activityLog = [];
 
-function studentCompletedQuiz(studentId, quizId) {
-  return quizAttempts.some((attempt) =>
+function studentCompletedQuiz(studentId, quizId, attempts = quizAttempts) {
+  return attempts.some((attempt) =>
     String(attempt.quizId) === String(quizId)
     && Number(attempt.studentId) === Number(studentId)
     && Number(attempt.total) > 0
   );
 }
 
-function studentCanAccessVideo(student, video, purchases = videoPurchases) {
+function studentCanAccessVideo(student, video, purchases = videoPurchases, attempts = quizAttempts) {
   const key = packageKey(video.grade, video.term, video.unitId);
   const hasContentAccess = Boolean(
     student.contentUnlocked
     || student.contentAccess?.all
     || student.contentAccess?.packages?.includes(key)
     || student.contentAccess?.videoIds?.includes(video.id)
-    || purchases.some((purchase) => purchase.videoId === video.id && purchase.studentId === student.id)
+    || purchases.some((purchase) => Number(purchase.videoId) === Number(video.id) && Number(purchase.studentId) === Number(student.id))
   );
   const lesson = lessonCatalog.find((item) => Number(item.id) === Number(video.lessonId || video.id));
   const requiredQuizId = String(lesson?.requiredQuizId || '');
-  return hasContentAccess && (!requiredQuizId || studentCompletedQuiz(student.id, requiredQuizId));
+  return hasContentAccess && (!requiredQuizId || studentCompletedQuiz(student.id, requiredQuizId, attempts));
+}
+
+// Mongo is the source of truth. The in-memory arrays are hydrated once per
+// instance at cold start, and Vercel runs several instances, so memory goes
+// stale after any write handled by another instance. User-facing entitlement
+// and wallet paths read fresh state from Mongo per request and fall back to
+// memory when Mongo is unavailable.
+async function getFreshUser(userId) {
+  const fallback = users.find((item) => Number(item.id) === Number(userId)) || null;
+  if (!mongoReady) return fallback;
+  try {
+    const fresh = await User.findOne({ id: Number(userId) }).lean();
+    return fresh || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function getFreshStudentState(userId) {
+  const id = Number(userId);
+  const fromMemory = () => ({
+    user: users.find((item) => Number(item.id) === id) || null,
+    videoPurchases: videoPurchases.filter((purchase) => Number(purchase.studentId) === id),
+    quizPurchases: quizPurchases.filter((purchase) => Number(purchase.studentId) === id),
+    attempts: quizAttempts.filter((attempt) => Number(attempt.studentId) === id),
+  });
+  if (!mongoReady) return fromMemory();
+  try {
+    const [freshUser, freshVideoPurchases, freshQuizPurchases, freshAttempts] = await Promise.all([
+      User.findOne({ id }).lean(),
+      VideoPurchase.find({ studentId: id }).lean(),
+      QuizPurchase.find({ studentId: id }).lean(),
+      QuizAttempt.find({ studentId: id }).lean(),
+    ]);
+    return {
+      user: freshUser || users.find((item) => Number(item.id) === id) || null,
+      videoPurchases: freshVideoPurchases,
+      quizPurchases: freshQuizPurchases,
+      attempts: freshAttempts,
+    };
+  } catch {
+    return fromMemory();
+  }
+}
+
+async function getFreshCatalogs() {
+  const fromMemory = () => ({ videos: videoCatalog, lessons: lessonCatalog, quizList: quizzes, unitSettings });
+  if (!mongoReady) return fromMemory();
+  try {
+    const [savedVideos, savedLessons, savedQuizzes, savedUnitSettings] = await Promise.all([
+      Video.find().lean(),
+      Lesson.find().lean(),
+      Quiz.find().lean(),
+      UnitSetting.find().lean(),
+    ]);
+    if (!savedVideos.length) return fromMemory();
+    const freshVideos = savedVideos.map(normalizeVideoDoc);
+    const freshLessons = savedLessons.map((lesson) => ({
+      ...lesson,
+      id: Number(lesson.id),
+      grade: lesson.grade || 'second-secondary',
+      term: lesson.term || '',
+      unitId: Number(lesson.unitId) || 1,
+    }));
+    // Mirror init: synthesize lesson docs for videos whose lesson is missing.
+    [...new Set(freshVideos.map((video) => Number(video.lessonId)))]
+      .filter((lessonId) => !freshLessons.some((lesson) => lesson.id === lessonId))
+      .forEach((lessonId) => {
+        const lessonVideos = freshVideos
+          .filter((video) => Number(video.lessonId) === lessonId)
+          .sort((left, right) => new Date(left.createdAt || 0) - new Date(right.createdAt || 0) || left.id - right.id);
+        const firstVideo = lessonVideos[0];
+        if (firstVideo) {
+          freshLessons.push({
+            id: lessonId,
+            title: firstVideo.title,
+            grade: firstVideo.grade,
+            term: firstVideo.term,
+            unitId: firstVideo.unitId,
+            createdAt: firstVideo.createdAt || new Date(),
+          });
+        }
+      });
+    return {
+      videos: freshVideos,
+      lessons: freshLessons,
+      quizList: savedQuizzes.map(normalizeQuizDoc),
+      unitSettings: mergeUnitSettingDocs(savedUnitSettings),
+    };
+  } catch {
+    return fromMemory();
+  }
 }
 
 function studentHasAnyVideoAccess(student, purchases = videoPurchases) {
@@ -698,6 +822,8 @@ function generateToken(user) {
 }
 
 function authenticate(req, res, next) {
+  // Authenticated responses are per-user: never let any shared cache store them.
+  res.set('Cache-Control', 'private, no-store');
   if (!jwtConfigured) {
     return res.status(503).json({ message: 'إعداد JWT_SECRET مطلوب لتشغيل تسجيل الدخول.' });
   }
@@ -810,21 +936,22 @@ app.get('/api/public/quiz-leaderboard', cachePublicBriefly, (req, res) => {
 });
 
 app.get('/api/public/units/second-secondary', cachePublicBriefly, async (req, res) => {
+  const catalogs = await getFreshCatalogs();
   const availableUnitIds = new Set([
-    ...videoCatalog
+    ...catalogs.videos
       .filter((video) => video.grade === 'second-secondary')
       .map((video) => Number(video.unitId) || 1),
-    ...quizzes
+    ...catalogs.quizList
       .filter((quiz) => quiz.published && quiz.grade === 'second-secondary')
       .map((quiz) => Number(quiz.unitId) || 1),
   ]);
   const units = await Promise.all([...availableUnitIds].sort((left, right) => left - right).map(async (unitId) => {
-    const setting = unitSettings.find((item) => item.unitId === unitId);
+    const setting = catalogs.unitSettings.find((item) => item.unitId === unitId);
     if (setting?.visible === false) return null;
-    const unitVideos = videoCatalog.filter((video) => video.grade === 'second-secondary' && Number(video.unitId) === unitId);
-    const unitQuizzes = quizzes.filter((quiz) => quiz.published && quiz.grade === 'second-secondary' && Number(quiz.unitId) === unitId);
+    const unitVideos = catalogs.videos.filter((video) => video.grade === 'second-secondary' && Number(video.unitId) === unitId);
+    const unitQuizzes = catalogs.quizList.filter((quiz) => quiz.published && quiz.grade === 'second-secondary' && Number(quiz.unitId) === unitId);
     const lessonIds = new Set(unitVideos.map((video) => Number(video.lessonId || video.id)));
-    const unitLessons = await getLessonSummaries((lesson) => lesson.grade === 'second-secondary' && Number(lesson.unitId) === unitId);
+    const unitLessons = await getLessonSummaries((lesson) => lesson.grade === 'second-secondary' && Number(lesson.unitId) === unitId, catalogs.lessons, catalogs.videos);
     const firstLesson = unitLessons.find((lesson) => lessonIds.has(Number(lesson.id)));
     const newestContentAt = [...unitVideos, ...unitQuizzes, ...unitLessons]
       .reduce((latest, item) => Math.max(latest, new Date(item.createdAt || 0).getTime()), 0);
@@ -847,15 +974,16 @@ app.get('/api/public/units/second-secondary', cachePublicBriefly, async (req, re
 // Never includes video URLs, PDF links or quiz questions, so visitors and
 // unpurchased students can browse without any playable content leaking.
 app.get('/api/public/units/second-secondary/:unitId/preview', cachePublicBriefly, async (req, res) => {
+  const catalogs = await getFreshCatalogs();
   const unitId = Number(req.params.unitId) || 1;
-  const setting = unitSettings.find((item) => item.unitId === unitId);
+  const setting = catalogs.unitSettings.find((item) => item.unitId === unitId);
   if (setting?.visible === false) return res.status(404).json({ message: 'الوحدة غير متاحة' });
-  const unitVideos = videoCatalog.filter((video) => video.grade === 'second-secondary' && Number(video.unitId) === unitId);
-  const unitQuizzes = quizzes.filter((quiz) => quiz.published && quiz.grade === 'second-secondary' && Number(quiz.unitId) === unitId);
+  const unitVideos = catalogs.videos.filter((video) => video.grade === 'second-secondary' && Number(video.unitId) === unitId);
+  const unitQuizzes = catalogs.quizList.filter((quiz) => quiz.published && quiz.grade === 'second-secondary' && Number(quiz.unitId) === unitId);
   if (!unitVideos.length && !unitQuizzes.length) return res.status(404).json({ message: 'الوحدة غير متاحة' });
 
   const lessonIds = new Set(unitVideos.map((video) => Number(video.lessonId || video.id)));
-  const unitLessons = (await getLessonSummaries((lesson) => lesson.grade === 'second-secondary' && Number(lesson.unitId) === unitId))
+  const unitLessons = (await getLessonSummaries((lesson) => lesson.grade === 'second-secondary' && Number(lesson.unitId) === unitId, catalogs.lessons, catalogs.videos))
     .filter((lesson) => lessonIds.has(Number(lesson.id)));
   const lessons = unitLessons.map((lesson) => ({
     id: lesson.id,
@@ -1118,15 +1246,29 @@ app.post('/api/admin/recharge-requests/:id/approve', authenticate, requireAdmin,
   if (!student) return res.status(404).json({ message: 'الطالب غير موجود' });
   const creditedAmount = Number(req.body.amount ?? request.amount);
   if (!Number.isFinite(creditedAmount) || creditedAmount <= 0) return res.status(400).json({ message: 'مبلغ الإضافة غير صحيح' });
-  student.balance += creditedAmount;
   request.status = 'Approved';
   request.creditedAmount = creditedAmount;
   request.reviewedAt = new Date().toISOString();
-  await User.updateOne({ id: student.id }, { $set: { balance: student.balance } });
+  // Credit the balance atomically in Mongo (source of truth), then sync this
+  // instance's memory so immediate reads on it agree with other instances.
+  let newBalance;
+  if (mongoReady) {
+    const credited = await User.findOneAndUpdate(
+      { id: Number(request.studentId), role: 'student' },
+      { $inc: { balance: creditedAmount } },
+      { new: true, lean: true }
+    );
+    newBalance = credited ? Number(credited.balance) : (Number(student.balance) || 0) + creditedAmount;
+  } else {
+    student.balance = (Number(student.balance) || 0) + creditedAmount;
+    newBalance = student.balance;
+  }
+  const memoryStudent = users.find((user) => Number(user.id) === Number(request.studentId));
+  if (memoryStudent) memoryStudent.balance = newBalance;
   await RechargeRequest.updateOne({ id: request.id }, { $set: { status: request.status, creditedAmount: request.creditedAmount, reviewedAt: request.reviewedAt } });
   const memoryRequest = rechargeRequests.find((item) => String(item.id) === String(request.id));
   if (memoryRequest) Object.assign(memoryRequest, { status: request.status, creditedAmount: request.creditedAmount, reviewedAt: request.reviewedAt });
-  res.json({ request, balance: student.balance, message: 'تم اعتماد الطلب وإضافة الرصيد' });
+  res.json({ request, balance: newBalance, message: 'تم اعتماد الطلب وإضافة الرصيد' });
 });
 
 app.post('/api/admin/recharge-requests/:id/reject', authenticate, requireAdmin, async (req, res) => {
@@ -1194,7 +1336,9 @@ app.delete('/api/chat/messages/:id', authenticate, requireAdmin, async (req, res
 });
 
 app.get('/api/dashboard', authenticate, async (req, res) => {
-  const currentUser = users.find((item) => item.id === req.user.id);
+  // A user created after this instance's cold start is not in memory yet;
+  // resolve from Mongo (source of truth) before giving up.
+  const currentUser = users.find((item) => item.id === req.user.id) || await getFreshUser(req.user.id);
 
   if (!currentUser) {
     return res.status(404).json({ message: 'المستخدم غير موجود' });
@@ -1250,50 +1394,60 @@ app.get('/api/dashboard', authenticate, async (req, res) => {
     });
   }
 
-  const studentVideos = videoCatalog.filter((video) => video.grade === (currentUser.grade || 'second-secondary') && (currentUser.grade === 'first-secondary' || !video.term || video.term === (currentUser.term || '')));
+  // Student branch: read entitlements, wallet and catalog fresh from Mongo so
+  // the response never reflects another instance's stale in-memory copy.
+  const [freshState, catalogs] = await Promise.all([
+    getFreshStudentState(req.user.id),
+    getFreshCatalogs(),
+  ]);
+  const freshUser = freshState.user || currentUser;
+  const gradeOf = freshUser.grade || 'second-secondary';
+  const termOf = freshUser.term || '';
+  const canAccessFresh = (video) => studentCanAccessVideo(freshUser, video, freshState.videoPurchases, freshState.attempts);
+  const studentVideos = catalogs.videos.filter((video) => video.grade === gradeOf && (gradeOf === 'first-secondary' || !video.term || video.term === termOf));
   const videos = studentVideos.map((video) => {
     const key = packageKey(video.grade, video.term, video.unitId);
-    const paid = Boolean(currentUser.contentUnlocked || currentUser.contentAccess?.all
-      || currentUser.contentAccess?.packages?.includes(key)
-      || currentUser.contentAccess?.videoIds?.includes(video.id)
-      || videoPurchases.some((purchase) => purchase.videoId === video.id && purchase.studentId === currentUser.id));
-    const open = studentCanAccessVideo(currentUser, video);
-    return { ...video, url: open ? video.url : '', packageKey: key, packagePurchased: currentUser.contentAccess?.packages?.includes(key), purchased: paid, locked: !paid };
+    const paid = Boolean(freshUser.contentUnlocked || freshUser.contentAccess?.all
+      || freshUser.contentAccess?.packages?.includes(key)
+      || freshUser.contentAccess?.videoIds?.includes(video.id)
+      || freshState.videoPurchases.some((purchase) => Number(purchase.videoId) === Number(video.id)));
+    const open = canAccessFresh(video);
+    return { ...video, url: open ? video.url : '', packageKey: key, packagePurchased: freshUser.contentAccess?.packages?.includes(key), purchased: paid, locked: !paid };
   });
   const studentVideoMap = new Map(videos.map((video) => [video.id, video]));
-  const studentLessons = (await getLessonSummaries((lesson) => lesson.grade === (currentUser.grade || 'second-secondary')
-    && (currentUser.grade === 'first-secondary' || !lesson.term || lesson.term === (currentUser.term || ''))))
+  const studentLessons = (await getLessonSummaries((lesson) => lesson.grade === gradeOf
+    && (gradeOf === 'first-secondary' || !lesson.term || lesson.term === termOf), catalogs.lessons, catalogs.videos))
     .map((lesson) => ({
       ...lesson,
-      requiredQuizCompleted: !lesson.requiredQuizId || studentCompletedQuiz(currentUser.id, lesson.requiredQuizId),
+      requiredQuizCompleted: !lesson.requiredQuizId || studentCompletedQuiz(freshUser.id, lesson.requiredQuizId, freshState.attempts),
       videos: lesson.videos.map((video) => studentVideoMap.get(video.id)).filter(Boolean),
-      pdfs: lesson.videos.some((video) => studentCanAccessVideo(currentUser, video))
+      pdfs: lesson.videos.some((video) => canAccessFresh(video))
         ? lesson.pdfs
         : [],
     }))
     .filter((lesson) => lesson.videos.length > 0);
-  const studentQuizzes = quizzes.filter((quiz) => quiz.published && quiz.grade === (currentUser.grade || 'second-secondary') && (currentUser.grade === 'first-secondary' || !quiz.term || quiz.term === (currentUser.term || '')));
+  const studentQuizzes = catalogs.quizList.filter((quiz) => quiz.published && quiz.grade === gradeOf && (gradeOf === 'first-secondary' || !quiz.term || quiz.term === termOf));
 
   return res.json({
     role: 'student',
-    balance: currentUser.balance,
-    hasPaid: currentUser.balance > 0 || currentUser.contentUnlocked,
-    contentUnlocked: currentUser.contentUnlocked,
-    quizzes: studentQuizzes.map(({ questions, ...quiz }) => ({ ...quiz, packageKey: packageKey(quiz.grade, quiz.term, quiz.unitId), purchased: currentUser.contentUnlocked || currentUser.contentAccess?.all || currentUser.contentAccess?.packages?.includes(packageKey(quiz.grade, quiz.term, quiz.unitId)) || quiz.packagePrice === 0 || quiz.price === 0 || quizPurchases.some((purchase) => purchase.quizId === quiz.id && purchase.studentId === currentUser.id), questionCount: questions.length })),
-    attempts: quizAttempts.filter((attempt) => attempt.studentId === currentUser.id),
+    balance: freshUser.balance,
+    hasPaid: freshUser.balance > 0 || freshUser.contentUnlocked,
+    contentUnlocked: freshUser.contentUnlocked,
+    quizzes: studentQuizzes.map(({ questions, ...quiz }) => ({ ...quiz, packageKey: packageKey(quiz.grade, quiz.term, quiz.unitId), purchased: freshUser.contentUnlocked || freshUser.contentAccess?.all || freshUser.contentAccess?.packages?.includes(packageKey(quiz.grade, quiz.term, quiz.unitId)) || quiz.packagePrice === 0 || quiz.price === 0 || freshState.quizPurchases.some((purchase) => String(purchase.quizId) === String(quiz.id)), questionCount: questions.length })),
+    attempts: freshState.attempts,
     lessons: studentLessons,
     user: {
-      id: currentUser.id,
-      name: currentUser.name,
-      email: currentUser.email,
-      grade: currentUser.grade || 'second-secondary',
-      term: currentUser.term || '',
-      role: currentUser.role,
-      studentNumber: currentUser.studentNumber || '',
-      phone: currentUser.phone || '',
-      guardianPhone: currentUser.guardianPhone || '',
-      avatar: currentUser.avatar || '',
-      balance: currentUser.balance,
+      id: freshUser.id,
+      name: freshUser.name,
+      email: freshUser.email,
+      grade: gradeOf,
+      term: termOf,
+      role: freshUser.role,
+      studentNumber: freshUser.studentNumber || '',
+      phone: freshUser.phone || '',
+      guardianPhone: freshUser.guardianPhone || '',
+      avatar: freshUser.avatar || '',
+      balance: freshUser.balance,
     },
     videos,
     message: 'المحاضرات مقفلة حتى يتم إتمام الدفع',
@@ -1301,19 +1455,40 @@ app.get('/api/dashboard', authenticate, async (req, res) => {
 });
 
 app.post('/api/packages/:packageKey/purchase', authenticate, async (req, res) => {
-  const student = users.find((item) => item.id === req.user.id && item.role === 'student');
-  if (!student) return res.status(403).json({ message: 'هذه العملية خاصة بالطلاب فقط' });
   const requestedKey = String(req.params.packageKey);
-  const matchingVideos = videoCatalog.filter((video) => packageKey(video.grade, video.term, video.unitId) === requestedKey);
-  const matchingQuizzes = quizzes.filter((quiz) => quiz.published && packageKey(quiz.grade, quiz.term, quiz.unitId) === requestedKey);
+  const catalogs = await getFreshCatalogs();
+  const matchingVideos = catalogs.videos.filter((video) => packageKey(video.grade, video.term, video.unitId) === requestedKey);
+  const matchingQuizzes = catalogs.quizList.filter((quiz) => quiz.published && packageKey(quiz.grade, quiz.term, quiz.unitId) === requestedKey);
   if (!matchingVideos.length && !matchingQuizzes.length) return res.status(404).json({ message: 'الباكدج غير موجودة' });
   const packagePrice = Number(matchingVideos[0]?.packagePrice ?? matchingQuizzes[0]?.packagePrice ?? 0);
+  if (mongoReady) {
+    const freshUser = await User.findOne({ id: req.user.id, role: 'student' }).lean();
+    if (!freshUser) return res.status(403).json({ message: 'هذه العملية خاصة بالطلاب فقط' });
+    if (Array.isArray(freshUser.contentAccess?.packages) && freshUser.contentAccess.packages.includes(requestedKey)) {
+      return res.json({ success: true, purchased: true, balance: freshUser.balance });
+    }
+    // Atomic debit: only applies when the balance still covers the price, so a
+    // double-click or a race against another debit can never double-charge.
+    const updated = await User.findOneAndUpdate(
+      { id: req.user.id, role: 'student', balance: { $gte: packagePrice }, 'contentAccess.packages': { $ne: requestedKey } },
+      { $inc: { balance: -packagePrice }, $addToSet: { 'contentAccess.packages': requestedKey } },
+      { new: true, lean: true }
+    );
+    if (!updated) return res.status(402).json({ message: `رصيدك غير كافٍ. سعر الباكدج ${packagePrice} جنيه مصري` });
+    const memoryStudent = users.find((user) => Number(user.id) === Number(req.user.id));
+    if (memoryStudent) {
+      memoryStudent.balance = updated.balance;
+      memoryStudent.contentAccess = updated.contentAccess;
+    }
+    return res.json({ success: true, purchased: true, balance: updated.balance });
+  }
+  const student = users.find((item) => item.id === req.user.id && item.role === 'student');
+  if (!student) return res.status(403).json({ message: 'هذه العملية خاصة بالطلاب فقط' });
   const packages = Array.isArray(student.contentAccess?.packages) ? student.contentAccess.packages : [];
   if (packages.includes(requestedKey)) return res.json({ success: true, purchased: true, balance: student.balance });
   if (student.balance < packagePrice) return res.status(402).json({ message: `رصيدك غير كافٍ. سعر الباكدج ${packagePrice} جنيه مصري` });
   student.balance -= packagePrice;
   student.contentAccess = { ...(student.contentAccess || {}), packages: [...packages, requestedKey] };
-  if (mongoReady) await User.updateOne({ id: student.id }, { $set: { balance: student.balance, contentAccess: student.contentAccess } });
   res.json({ success: true, purchased: true, balance: student.balance });
 });
 
@@ -1467,11 +1642,15 @@ app.get('/api/lessons/:lessonId/pdfs/:resourceId', authenticate, async (req, res
   const lessonId = Number(req.params.lessonId);
   const resourceId = String(req.params.resourceId);
   const lesson = lessonCatalog.find((item) => item.id === lessonId);
-  const currentUser = users.find((item) => item.id === req.user.id);
+  const currentUser = await getFreshUser(req.user.id);
   if (!lesson || !currentUser) return res.status(404).json({ message: 'ملف المحاضرة غير موجود' });
   const lessonVideos = getLessonVideoItems(lessonId);
-  if (currentUser.role !== 'admin' && !lessonVideos.some((video) => studentCanAccessVideo(currentUser, video))) {
-    return res.status(403).json({ message: 'يجب شراء محتوى الوحدة لعرض ملف المحاضرة' });
+  if (currentUser.role !== 'admin') {
+    const freshState = await getFreshStudentState(req.user.id);
+    const accessUser = freshState.user || currentUser;
+    if (!lessonVideos.some((video) => studentCanAccessVideo(accessUser, video, freshState.videoPurchases, freshState.attempts))) {
+      return res.status(403).json({ message: 'يجب شراء محتوى الوحدة لعرض ملف المحاضرة' });
+    }
   }
 
   let document;
@@ -1550,10 +1729,13 @@ app.delete('/api/admin/videos/:id/lesson-pdf', authenticate, requireAdmin, async
 app.get('/api/videos/:id/lesson-pdf', authenticate, async (req, res) => {
   const videoId = Number(req.params.id);
   const video = videoCatalog.find((item) => item.id === videoId);
-  const currentUser = users.find((item) => item.id === req.user.id);
+  const currentUser = await getFreshUser(req.user.id);
   if (!video || !currentUser) return res.status(404).json({ message: 'ملف المحاضرة غير موجود' });
-  if (currentUser.role !== 'admin' && !studentCanAccessVideo(currentUser, video)) {
-    return res.status(403).json({ message: 'يجب شراء محتوى الوحدة لعرض ملف المحاضرة' });
+  if (currentUser.role !== 'admin') {
+    const freshState = await getFreshStudentState(req.user.id);
+    if (!studentCanAccessVideo(freshState.user || currentUser, video, freshState.videoPurchases, freshState.attempts)) {
+      return res.status(403).json({ message: 'يجب شراء محتوى الوحدة لعرض ملف المحاضرة' });
+    }
   }
 
   let document;
@@ -1638,27 +1820,59 @@ app.delete('/api/admin/videos/:id', authenticate, requireAdmin, async (req, res)
 
 app.post('/api/videos/:id/purchase', authenticate, async (req, res) => {
   const videoId = Number(req.params.id);
-  const video = videoCatalog.find((item) => item.id === videoId);
+  const catalogs = await getFreshCatalogs();
+  const video = catalogs.videos.find((item) => item.id === videoId);
   if (!video) return res.status(404).json({ message: 'المحاضرة غير موجودة' });
+  const price = Number(video.price) || 0;
+  if (mongoReady) {
+    const [freshUser, existingPurchase] = await Promise.all([
+      User.findOne({ id: req.user.id, role: 'student' }).lean(),
+      VideoPurchase.findOne({ videoId, studentId: Number(req.user.id) }).lean(),
+    ]);
+    if (!freshUser) return res.status(403).json({ message: 'هذه العملية خاصة بالطلاب فقط' });
+    const alreadyOpen = freshUser.contentUnlocked || freshUser.contentAccess?.all || freshUser.contentAccess?.videoIds?.includes(videoId) || existingPurchase;
+    if (alreadyOpen) return res.json({ success: true, purchased: true, balance: freshUser.balance });
+    // Atomic debit: only applies while the balance still covers the price.
+    const updated = await User.findOneAndUpdate(
+      { id: req.user.id, role: 'student', balance: { $gte: price } },
+      { $inc: { balance: -price } },
+      { new: true, lean: true }
+    );
+    if (!updated) return res.status(402).json({ message: `رصيدك غير كافٍ. سعر المحاضرة ${price} جنيه مصري` });
+    const purchase = { videoId, studentId: freshUser.id, price, purchasedAt: new Date().toISOString() };
+    try {
+      await VideoPurchase.create(purchase);
+    } catch (error) {
+      // Refund the debit if recording the entitlement itself failed.
+      await User.updateOne({ id: freshUser.id }, { $inc: { balance: price } });
+      throw error;
+    }
+    videoPurchases.push(purchase);
+    const memoryStudent = users.find((user) => Number(user.id) === Number(freshUser.id));
+    if (memoryStudent) memoryStudent.balance = updated.balance;
+    return res.json({ success: true, purchased: true, balance: updated.balance });
+  }
   const student = users.find((item) => item.id === req.user.id && item.role === 'student');
   const alreadyOpen = student?.contentUnlocked || student?.contentAccess?.all || student?.contentAccess?.videoIds?.includes(videoId) || videoPurchases.some((purchase) => purchase.videoId === videoId && purchase.studentId === req.user.id);
   if (alreadyOpen) return res.json({ success: true, purchased: true, balance: student.balance });
-  const price = Number(video.price) || 0;
   if (!student || student.balance < price) return res.status(402).json({ message: `رصيدك غير كافٍ. سعر المحاضرة ${price} جنيه مصري` });
   student.balance -= price;
   const purchase = { videoId, studentId: student.id, price, purchasedAt: new Date().toISOString() };
   videoPurchases.push(purchase);
-  if (mongoReady) await VideoPurchase.create(purchase);
-  await User.updateOne({ id: student.id }, { $set: { balance: student.balance } });
   res.json({ success: true, purchased: true, balance: student.balance });
 });
 
-app.post('/api/videos/:id/view', authenticate, (req, res) => {
-  const video = videoCatalog.find((item) => item.id === Number(req.params.id));
+app.post('/api/videos/:id/view', authenticate, async (req, res) => {
+  const catalogs = await getFreshCatalogs();
+  const video = catalogs.videos.find((item) => item.id === Number(req.params.id));
   if (!video) return res.status(404).json({ message: 'المحاضرة غير موجودة' });
-  const currentUser = users.find((item) => item.id === req.user.id);
-  if (!currentUser || (currentUser.role !== 'admin' && !studentCanAccessVideo(currentUser, video))) {
-    return res.status(403).json({ message: 'يجب شراء محتوى الوحدة لمشاهدة المحاضرة' });
+  const currentUser = await getFreshUser(req.user.id);
+  if (!currentUser) return res.status(403).json({ message: 'يجب شراء محتوى الوحدة لمشاهدة المحاضرة' });
+  if (currentUser.role !== 'admin') {
+    const freshState = await getFreshStudentState(req.user.id);
+    if (!studentCanAccessVideo(freshState.user || currentUser, video, freshState.videoPurchases, freshState.attempts)) {
+      return res.status(403).json({ message: 'يجب شراء محتوى الوحدة لمشاهدة المحاضرة' });
+    }
   }
   activityLog.push({ studentId: req.user.id, type: 'video', label: `مشاهدة محاضرة: ${video.title}`, detail: 'تم تسجيل المشاهدة', createdAt: new Date().toISOString() });
   res.json({ success: true });
@@ -1701,17 +1915,33 @@ app.delete('/api/admin/students/:id', authenticate, requireAdmin, async (req, re
   res.json({ success: true });
 });
 
-app.post('/api/admin/students/:id/balance', authenticate, requireAdmin, (req, res) => {
-  const student = users.find((item) => item.id === Number(req.params.id) && item.role === 'student');
+app.post('/api/admin/students/:id/balance', authenticate, requireAdmin, async (req, res) => {
+  const studentId = Number(req.params.id);
   const amount = Number(req.body.amount);
 
-  if (!student) return res.status(404).json({ message: 'الطالب غير موجود' });
-  if (!Number.isFinite(amount) || amount === 0 || student.balance + amount < 0) {
+  if (!Number.isFinite(amount) || amount === 0) {
     return res.status(400).json({ message: 'قيمة الرصيد غير صحيحة أو ستجعل الرصيد سالبًا' });
   }
-
+  if (mongoReady) {
+    // Atomic adjust in Mongo (source of truth); never lets the balance go negative.
+    const filter = { id: studentId, role: 'student' };
+    if (amount < 0) filter.balance = { $gte: -amount };
+    const updated = await User.findOneAndUpdate(filter, { $inc: { balance: amount } }, { new: true, lean: true });
+    if (!updated) {
+      const exists = await User.findOne({ id: studentId, role: 'student' }).lean();
+      if (!exists) return res.status(404).json({ message: 'الطالب غير موجود' });
+      return res.status(400).json({ message: 'قيمة الرصيد غير صحيحة أو ستجعل الرصيد سالبًا' });
+    }
+    const memoryStudent = users.find((item) => item.id === studentId);
+    if (memoryStudent) memoryStudent.balance = updated.balance;
+    return res.json({ success: true, student: { id: studentId, balance: updated.balance } });
+  }
+  const student = users.find((item) => item.id === studentId && item.role === 'student');
+  if (!student) return res.status(404).json({ message: 'الطالب غير موجود' });
+  if (student.balance + amount < 0) {
+    return res.status(400).json({ message: 'قيمة الرصيد غير صحيحة أو ستجعل الرصيد سالبًا' });
+  }
   student.balance += amount;
-  User.updateOne({ id: student.id }, { $set: { balance: student.balance } }).catch((error) => console.error(`Balance persistence failed: ${error.message}`));
   res.json({ success: true, student: { id: student.id, balance: student.balance } });
 });
 
@@ -1729,15 +1959,20 @@ app.post('/api/admin/students/:id/password', authenticate, requireAdmin, async (
   res.json({ success: true, message: 'تم تغيير كلمة مرور الطالب' });
 });
 
-app.post('/api/admin/students/:id/unlock', authenticate, requireAdmin, (req, res) => {
-  const student = users.find((item) => item.id === Number(req.params.id) && item.role === 'student');
+app.post('/api/admin/students/:id/unlock', authenticate, requireAdmin, async (req, res) => {
+  const student = await getFreshUser(Number(req.params.id));
 
-  if (!student) return res.status(404).json({ message: 'الطالب غير موجود' });
+  if (!student || student.role !== 'student') return res.status(404).json({ message: 'الطالب غير موجود' });
 
-  student.contentUnlocked = Boolean(req.body.unlocked);
-  student.contentAccess = { all: student.contentUnlocked, videoIds: student.contentUnlocked ? videoCatalog.map((video) => video.id) : [] };
-  User.updateOne({ id: student.id }, { $set: { contentUnlocked: student.contentUnlocked, contentAccess: student.contentAccess } }).catch((error) => console.error(`Content access persistence failed: ${error.message}`));
-  res.json({ success: true, contentUnlocked: student.contentUnlocked });
+  const contentUnlocked = Boolean(req.body.unlocked);
+  const contentAccess = { all: contentUnlocked, videoIds: contentUnlocked ? videoCatalog.map((video) => video.id) : [] };
+  if (mongoReady) await User.updateOne({ id: student.id }, { $set: { contentUnlocked, contentAccess } });
+  const memoryStudent = users.find((item) => item.id === Number(student.id));
+  if (memoryStudent) {
+    memoryStudent.contentUnlocked = contentUnlocked;
+    memoryStudent.contentAccess = contentAccess;
+  }
+  res.json({ success: true, contentUnlocked });
 });
 
 app.get('/api/admin/students/:id/details', authenticate, requireAdmin, (req, res) => {
@@ -1751,14 +1986,19 @@ app.get('/api/admin/students/:id/details', authenticate, requireAdmin, (req, res
   });
 });
 
-app.post('/api/admin/students/:id/content', authenticate, requireAdmin, (req, res) => {
-  const student = users.find((item) => item.id === Number(req.params.id) && item.role === 'student');
-  if (!student) return res.status(404).json({ message: 'الطالب غير موجود' });
+app.post('/api/admin/students/:id/content', authenticate, requireAdmin, async (req, res) => {
+  const student = await getFreshUser(Number(req.params.id));
+  if (!student || student.role !== 'student') return res.status(404).json({ message: 'الطالب غير موجود' });
   const videoIds = Array.isArray(req.body.videoIds) ? req.body.videoIds.map(Number).filter((id) => videoCatalog.some((video) => video.id === id)) : [];
-  student.contentAccess = { all: Boolean(req.body.all), videoIds };
-  student.contentUnlocked = student.contentAccess.all || videoIds.length > 0;
-  User.updateOne({ id: student.id }, { $set: { contentUnlocked: student.contentUnlocked, contentAccess: student.contentAccess } }).catch((error) => console.error(`Content access persistence failed: ${error.message}`));
-  res.json({ contentAccess: student.contentAccess, contentUnlocked: student.contentUnlocked });
+  const contentAccess = { all: Boolean(req.body.all), videoIds };
+  const contentUnlocked = contentAccess.all || videoIds.length > 0;
+  if (mongoReady) await User.updateOne({ id: student.id }, { $set: { contentUnlocked, contentAccess } });
+  const memoryStudent = users.find((item) => item.id === Number(student.id));
+  if (memoryStudent) {
+    memoryStudent.contentAccess = contentAccess;
+    memoryStudent.contentUnlocked = contentUnlocked;
+  }
+  res.json({ contentAccess, contentUnlocked });
 });
 
 app.get('/api/admin/quizzes', authenticate, requireAdmin, (req, res) => res.json({ quizzes }));
@@ -1873,27 +2113,58 @@ app.delete('/api/admin/quizzes/:id', authenticate, requireAdmin, async (req, res
   res.json({ success: true });
 });
 
-app.get('/api/quizzes', authenticate, (req, res) => res.json({ quizzes: quizzes.filter((quiz) => quiz.published).map(({ questions, ...quiz }) => ({ ...quiz, purchased: quiz.price === 0 || quizPurchases.some((purchase) => purchase.quizId === quiz.id && purchase.studentId === req.user.id), questionCount: questions.length, questions: questions.map(({ correctOption, modelAnswer, ...question }) => ({ ...question, type: question.type || 'multiple-choice' })) })) }));
+app.get('/api/quizzes', authenticate, async (req, res) => {
+  const [freshState, catalogs] = await Promise.all([getFreshStudentState(req.user.id), getFreshCatalogs()]);
+  return res.json({ quizzes: catalogs.quizList.filter((quiz) => quiz.published).map(({ questions, ...quiz }) => ({ ...quiz, purchased: quiz.price === 0 || freshState.quizPurchases.some((purchase) => String(purchase.quizId) === String(quiz.id)), questionCount: questions.length, questions: questions.map(({ correctOption, modelAnswer, ...question }) => ({ ...question, type: question.type || 'multiple-choice' })) })) });
+});
 
-app.post('/api/quizzes/:id/purchase', authenticate, (req, res) => {
-  const quiz = quizzes.find((item) => String(item.id) === String(req.params.id) && item.published);
+app.post('/api/quizzes/:id/purchase', authenticate, async (req, res) => {
+  const catalogs = await getFreshCatalogs();
+  const quiz = catalogs.quizList.find((item) => String(item.id) === String(req.params.id) && item.published);
   if (!quiz) return res.status(404).json({ message: 'الاختبار غير موجود' });
-  if (quiz.price === 0 || quizPurchases.some((purchase) => purchase.quizId === quiz.id && purchase.studentId === req.user.id)) return res.json({ success: true, purchased: true, balance: req.user.balance });
+  const price = Number(quiz.price) || 0;
+  if (mongoReady) {
+    const [freshUser, existingPurchase] = await Promise.all([
+      User.findOne({ id: req.user.id, role: 'student' }).lean(),
+      QuizPurchase.findOne({ quizId: String(quiz.id), studentId: Number(req.user.id) }).lean(),
+    ]);
+    if (price === 0 || existingPurchase) return res.json({ success: true, purchased: true, balance: freshUser ? freshUser.balance : req.user.balance });
+    if (!freshUser) return res.status(403).json({ message: 'هذه العملية خاصة بالطلاب فقط' });
+    const updated = await User.findOneAndUpdate(
+      { id: req.user.id, role: 'student', balance: { $gte: price } },
+      { $inc: { balance: -price } },
+      { new: true, lean: true }
+    );
+    if (!updated) return res.status(402).json({ message: `رصيدك غير كافٍ. سعر الاختبار ${price} جنيه مصري` });
+    const purchase = { quizId: String(quiz.id), studentId: freshUser.id, price, purchasedAt: new Date().toISOString() };
+    try {
+      await QuizPurchase.create(purchase);
+    } catch (error) {
+      await User.updateOne({ id: freshUser.id }, { $inc: { balance: price } });
+      throw error;
+    }
+    quizPurchases.push(purchase);
+    const memoryStudent = users.find((user) => Number(user.id) === Number(freshUser.id));
+    if (memoryStudent) memoryStudent.balance = updated.balance;
+    return res.json({ success: true, purchased: true, balance: updated.balance });
+  }
+  if (price === 0 || quizPurchases.some((purchase) => purchase.quizId === quiz.id && purchase.studentId === req.user.id)) return res.json({ success: true, purchased: true, balance: req.user.balance });
   const student = users.find((item) => item.id === req.user.id && item.role === 'student');
-  if (!student || student.balance < quiz.price) return res.status(402).json({ message: `رصيدك غير كافٍ. سعر الاختبار ${quiz.price} جنيه مصري` });
-  student.balance -= quiz.price;
-  User.updateOne({ id: student.id }, { $set: { balance: student.balance } }).catch((error) => console.error(`Quiz purchase persistence failed: ${error.message}`));
-  quizPurchases.push({ quizId: quiz.id, studentId: student.id, price: quiz.price, purchasedAt: new Date().toISOString() });
+  if (!student || student.balance < price) return res.status(402).json({ message: `رصيدك غير كافٍ. سعر الاختبار ${price} جنيه مصري` });
+  student.balance -= price;
+  quizPurchases.push({ quizId: quiz.id, studentId: student.id, price, purchasedAt: new Date().toISOString() });
   res.json({ success: true, purchased: true, balance: student.balance });
 });
 
 app.post('/api/quizzes/:id/submit', authenticate, async (req, res) => {
-  const quiz = quizzes.find((item) => String(item.id) === String(req.params.id) && item.published);
+  const catalogs = await getFreshCatalogs();
+  const quiz = catalogs.quizList.find((item) => String(item.id) === String(req.params.id) && item.published);
   if (!quiz) return res.status(404).json({ message: 'الاختبار غير موجود' });
-  const student = users.find((item) => item.id === req.user.id);
+  const freshState = await getFreshStudentState(req.user.id);
+  const student = freshState.user || users.find((item) => item.id === req.user.id);
   const quizPackageKey = packageKey(quiz.grade, quiz.term, quiz.unitId);
   const quizAvailable = quiz.price === 0
-    || quizPurchases.some((purchase) => purchase.quizId === quiz.id && purchase.studentId === req.user.id)
+    || freshState.quizPurchases.some((purchase) => String(purchase.quizId) === String(quiz.id))
     || student?.contentUnlocked
     || student?.contentAccess?.all
     || student?.contentAccess?.packages?.includes(quizPackageKey);
