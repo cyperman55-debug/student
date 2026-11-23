@@ -1786,6 +1786,39 @@ button.lesson-resource-row:hover {
   color: var(--muted);
 }
 
+.reports-section {
+  display: grid;
+  gap: 16px;
+}
+
+.reports-students-list {
+  display: grid;
+  gap: 18px;
+}
+
+.report-student-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.report-student-header h3 {
+  margin: 0;
+}
+
+.report-student-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: .85rem;
+}
+
+.report-student-card h4 {
+  margin: 8px 0 0;
+}
+
 .quiz-builder {
   display: grid;
   gap: 16px;

@@ -127,6 +127,14 @@ const videoPurchaseSchema = new mongoose.Schema({
   purchasedAt: { type: Date, default: Date.now },
 }, { versionKey: false });
 const VideoPurchase = mongoose.models.VideoPurchase || mongoose.model('VideoPurchase', videoPurchaseSchema);
+
+const videoViewSchema = new mongoose.Schema({
+  videoId: { type: Number, required: true },
+  studentId: { type: Number, required: true },
+  title: { type: String, default: '' },
+  viewedAt: { type: Date, default: Date.now },
+}, { versionKey: false });
+const VideoView = mongoose.models.VideoView || mongoose.model('VideoView', videoViewSchema);
 const quizPurchaseSchema = new mongoose.Schema({
   quizId: { type: String, required: true },
   studentId: { type: Number, required: true },
@@ -1875,7 +1883,70 @@ app.post('/api/videos/:id/view', authenticate, async (req, res) => {
     }
   }
   activityLog.push({ studentId: req.user.id, type: 'video', label: `مشاهدة محاضرة: ${video.title}`, detail: 'تم تسجيل المشاهدة', createdAt: new Date().toISOString() });
+  if (mongoReady) {
+    // Persist the view so admin reports survive cold starts and other instances.
+    VideoView.create({ videoId: Number(video.id), studentId: Number(req.user.id), title: video.title })
+      .catch((error) => console.error(`Video view persistence failed: ${error.message}`));
+  }
   res.json({ success: true });
+});
+
+app.get('/api/admin/reports/activity', authenticate, requireAdmin, async (req, res) => {
+  const summarizeStudent = (student, views, attempts) => ({
+    id: student.id,
+    name: student.name,
+    studentNumber: student.studentNumber || '',
+    email: student.email || '',
+    videoViews: views.map((view) => ({ videoId: view.videoId, title: view.title, viewedAt: view.viewedAt })),
+    quizAttempts: attempts.map((attempt) => ({
+      id: attempt.id,
+      quizId: attempt.quizId,
+      quizTitle: attempt.quizTitle,
+      score: attempt.score,
+      total: attempt.total,
+      pendingEssayCount: Number(attempt.pendingEssayCount) || 0,
+      submittedAt: attempt.submittedAt,
+    })),
+  });
+  if (mongoReady) {
+    try {
+      const [students, views, attempts] = await Promise.all([
+        User.find({ role: 'student' }).select('id name studentNumber email').lean(),
+        VideoView.find().sort({ viewedAt: -1 }).limit(500).lean(),
+        QuizAttempt.find().sort({ submittedAt: -1 }).limit(500).lean(),
+      ]);
+      const viewsByStudent = new Map();
+      views.forEach((view) => {
+        const list = viewsByStudent.get(Number(view.studentId)) || [];
+        list.push(view);
+        viewsByStudent.set(Number(view.studentId), list);
+      });
+      const attemptsByStudent = new Map();
+      attempts.forEach((attempt) => {
+        const list = attemptsByStudent.get(Number(attempt.studentId)) || [];
+        list.push(attempt);
+        attemptsByStudent.set(Number(attempt.studentId), list);
+      });
+      return res.json({
+        students: students
+          .sort((left, right) => Number(left.id) - Number(right.id))
+          .map((student) => summarizeStudent(student, viewsByStudent.get(Number(student.id)) || [], attemptsByStudent.get(Number(student.id)) || [])),
+      });
+    } catch (error) {
+      console.error(`Activity report failed: ${error.message}`);
+    }
+  }
+  const students = users.filter((item) => item.role === 'student');
+  const memoryViews = activityLog
+    .filter((item) => item.type === 'video')
+    .map((item) => ({ studentId: item.studentId, title: String(item.label || '').replace(/^مشاهدة محاضرة: /, ''), viewedAt: item.createdAt }));
+  return res.json({
+    students: students.map((student) => summarizeStudent(
+      student,
+      memoryViews.filter((view) => Number(view.studentId) === Number(student.id)).reverse(),
+      quizAttempts.filter((attempt) => Number(attempt.studentId) === Number(student.id)).slice().reverse(),
+    )),
+  });
 });
 
 app.get('/api/admin/students', authenticate, requireAdmin, (req, res) => {
@@ -1901,6 +1972,7 @@ app.delete('/api/admin/students/:id', authenticate, requireAdmin, async (req, re
     try {
       await User.deleteOne({ id: studentId, role: 'student' });
       await RechargeRequest.deleteMany({ studentId });
+      await VideoView.deleteMany({ studentId });
     } catch (error) {
       return res.status(500).json({ message: 'تعذر حذف الطالب من قاعدة البيانات' });
     }

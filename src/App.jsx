@@ -553,6 +553,9 @@ function App() {
   const [showStudentPassword, setShowStudentPassword] = useState(false);
   const [adminSection, setAdminSection] = useState('overview');
   const [studentDetails, setStudentDetails] = useState(null);
+  const [reportsActivity, setReportsActivity] = useState(null);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportsError, setReportsError] = useState('');
   const [quizList, setQuizList] = useState([]);
   const [quizTitle, setQuizTitle] = useState('');
   const [quizDescription, setQuizDescription] = useState('');
@@ -1160,6 +1163,21 @@ function App() {
     const data = await readApiResponse(response);
     if (!response.ok) throw new Error(data.message || 'تعذر تحميل بنك الأسئلة');
     setQuizList(data.quizzes || []);
+  };
+
+  const loadReportsActivity = async () => {
+    setReportsLoading(true);
+    setReportsError('');
+    try {
+      const response = await fetch(`${API_URL}/admin/reports/activity`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await readApiResponse(response);
+      if (!response.ok) throw new Error(data.message || 'تعذر تحميل التقارير');
+      setReportsActivity(data.students || []);
+    } catch (err) {
+      setReportsError(err.message || 'تعذر تحميل التقارير');
+    } finally {
+      setReportsLoading(false);
+    }
   };
 
   const loadPaymentRequests = async () => {
@@ -3094,7 +3112,7 @@ function App() {
           <button type="button" className={`nav-item ${adminSection === 'payments' ? 'active' : ''}`} onClick={() => { setAdminSection('payments'); loadPaymentRequests(); }}>طلبات الدفع</button>
           <button type="button" className={`nav-item ${adminSection === 'question-bank' ? 'active' : ''}`} onClick={() => { setAdminSection('question-bank'); loadQuizzes(); }}>بنك الأسئلة</button>
           <button type="button" className={`nav-item ${adminSection === 'chat' ? 'active' : ''}`} onClick={() => { setAdminSection('chat'); loadChatMessages(); }}>الشات</button>
-          <button type="button" className={`nav-item ${adminSection === 'reports' ? 'active' : ''}`} onClick={() => setAdminSection('reports')}>التقارير</button>
+          <button type="button" className={`nav-item ${adminSection === 'reports' ? 'active' : ''}`} onClick={() => { setAdminSection('reports'); loadReportsActivity(); }}>التقارير</button>
         </nav>
       </aside>
 
@@ -3330,6 +3348,41 @@ function App() {
                 <input value={chatText} onChange={(event) => setChatText(event.target.value)} placeholder="اكتب رسالة للطلاب..." maxLength={500} />
                 <button type="submit" className="primary-btn">إرسال للطلاب</button>
               </form>
+            </section>}
+
+            {adminSection === 'reports' && <section className="reports-section panel">
+              <div className="section-heading"><span className="eyebrow">متابعة الطلاب</span><h2>تقارير نشاط الطلاب</h2></div>
+              {reportsLoading && <p>جاري تحميل التقارير...</p>}
+              {reportsError && <p className="error-box">{reportsError}</p>}
+              {reportsActivity && !reportsLoading && <>
+                {!reportsActivity.some((student) => student.videoViews.length || student.quizAttempts.length)
+                  && <div className="chat-empty-state">لسه مفيش أي نشاط من الطلاب. أول ما طالب يتفرج على محاضرة أو يحل اختبار، هتلاقي كل حركة مسجلة هنا بالوقت والدرجة.</div>}
+                <div className="reports-students-list">
+                  {reportsActivity.map((student) => <article key={student.id} className="report-student-card">
+                    <div className="report-student-header">
+                      <h3>{student.name}</h3>
+                      <p>{student.email || 'بدون بريد'} • رقم الطالب: {student.studentNumber || 'غير مسجل'}</p>
+                    </div>
+                    <h4>المحاضرات اللي اتفرج عليها</h4>
+                    <div className="activity-list">
+                      {student.videoViews.map((view, index) => <div key={`${view.viewedAt}-${index}`}>
+                        <strong>{view.title || `محاضرة رقم ${view.videoId}`}</strong>
+                        <span>{new Date(view.viewedAt).toLocaleString('ar-EG')}</span>
+                      </div>)}
+                      {!student.videoViews.length && <p>لم يشاهد أي محاضرة بعد.</p>}
+                    </div>
+                    <h4>الاختبارات والدرجات</h4>
+                    <div className="activity-list">
+                      {student.quizAttempts.map((attempt) => <div key={attempt.id}>
+                        <strong>{attempt.quizTitle || 'اختبار'}</strong>
+                        <span>{attempt.score} من {attempt.total}{attempt.pendingEssayCount > 0 ? ` • ${attempt.pendingEssayCount} سؤال مقالي بانتظار التصحيح` : ''} • {new Date(attempt.submittedAt).toLocaleString('ar-EG')}</span>
+                      </div>)}
+                      {!student.quizAttempts.length && <p>لم يدخل أي اختبار بعد.</p>}
+                    </div>
+                  </article>)}
+                </div>
+              </>}
+              <button type="button" className="secondary-btn" onClick={loadReportsActivity}>تحديث التقارير</button>
             </section>}
 
             {adminSection === 'overview' && <section className="stats-grid">
